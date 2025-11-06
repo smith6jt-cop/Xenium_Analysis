@@ -102,7 +102,7 @@ plot_volcano <- function(de_results, title = "Volcano Plot") {
       y = "-Log10 Adjusted P-value"
     ) +
     geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "blue") +
-    geom_vline(xintercept = c(-0.5, 0.5), linestyle = "dashed", color = "blue") +
+    geom_vline(xintercept = c(-0.5, 0.5), linetype = "dashed", color = "blue") +
     theme(
       legend.position = "top",
       plot.title = element_text(hjust = 0.5, face = "bold")
