@@ -205,3 +205,30 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Xenium Analysis - Data files
+data/raw/*.h5
+data/raw/*.h5ad
+data/raw/*.csv
+data/processed/*.h5ad
+data/processed/*.csv
+data/phenocycler/*.h5ad
+data/phenocycler/*.csv
+
+# Xenium Analysis - Generated figures
+figures/**/*.png
+figures/**/*.jpg
+figures/**/*.pdf
+figures/**/*.svg
+
+# Xenium Analysis - Logs
+logs/
+*.out
+*.err
+
+# Executed notebooks
+notebooks/executed/
+
+# Large data files
+*.zarr/
+*.hdf5
