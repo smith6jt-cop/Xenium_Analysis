@@ -40,7 +40,7 @@ load_xenium_h5ad <- function(file_path) {
   
   # Add spatial coordinates if available
   if ("spatial" %in% names(adata$obsm)) {
-    spatial_coords <- as.matrix(adata$obsm["spatial"])
+    spatial_coords <- as.matrix(adata$obsm[['spatial']])
     colnames(spatial_coords) <- c("x", "y")
     seurat_obj@meta.data <- cbind(seurat_obj@meta.data, spatial_coords)
   }
