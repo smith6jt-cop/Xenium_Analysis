@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git fetch *)",
+      "Read(//home/smith6jt/**)",
+      "Bash(git -C /blue/maigan/smith6jt/KINTSUGI config --local --list)",
+      "Bash(git config *)",
+      "Bash(git -C /blue/maigan/smith6jt/Xenium_Analysis config --local --list)"
+    ]
+  }
+}
