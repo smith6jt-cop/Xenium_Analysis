@@ -329,6 +329,49 @@ Modify these variables in each script:
 #SBATCH --account=your_account
 ```
 
+## Exporting Clusters / Phenotypes to Xenium Explorer
+
+After phenotyping, you can push any `.obs` categorical (Leiden clusters,
+scVI labels, curated phenotypes, ...) back to Xenium Explorer 3.0+ so cells
+are colored by that grouping in the viewer.
+
+### From a notebook
+
+```python
+from utils import export_for_xenium_explorer
+
+export_for_xenium_explorer(
+    adata,
+    group_keys=["leiden_0.5", "celltype", "phenotype"],
+    output_dir="data/xenium_explorer",
+    sample_name="THYHDL065",
+    cell_id_key="cell_id",   # defaults to common candidates or the index
+)
+```
+
+Artifacts written:
+
+- `THYHDL065_cell_groups.csv` – load via **Cell → Add cell categorization**.
+- `THYHDL065/analysis.zarr.zip` – drop next to `experiment.xenium` so the
+  groupings show up automatically in the **Clusters** dropdown.
+- `THYHDL065_color_palette.json` – the category colors used, to keep
+  matplotlib figures consistent with the Explorer view.
+
+### From the CLI
+
+```bash
+python scripts/export_xenium_explorer_groups.py \
+    --input data/processed/THYHDL065_annotated.h5ad \
+    --output data/xenium_explorer \
+    --sample THYHDL065 \
+    --groups leiden_0.5 celltype phenotype \
+    --cell-id-key cell_id
+```
+
+> The CSV format matches cells by `cell_id` (safe after filtering).  The
+> `analysis.zarr.zip` is position-indexed, so use it only when the AnnData
+> row order matches the original `cells.parquet` order.
+
 ## Utility Functions
 
 The `utils/analysis_utils.py` module provides reusable functions:
