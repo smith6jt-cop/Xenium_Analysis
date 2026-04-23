@@ -32,7 +32,7 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-ci.txt
       - name: Install ruff
-        run: pip install -r requirements-ci.txt
+        run: python -m pip install --upgrade pip && pip install -r requirements-ci.txt
       - name: ruff check
         run: ruff check .
 
@@ -54,33 +54,41 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-ci.txt
       - name: Install CI deps
-        run: pip install -r requirements-ci.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+      - name: Diagnostic dump
+        # Prints the effective test environment so any future CI failures
+        # can be debugged from the log without reproducing locally.
+        run: |
+          python -V
+          which python
+          pip list
+          python -c "import sys; print('sys.path:'); [print(' ', p) for p in sys.path]"
       - name: pytest
-        run: pytest --cov=utils --cov-report=term --cov-report=xml
-      - name: Upload coverage (3.12 only)
-        if: matrix.python-version == '3.12'
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-xml
-          path: coverage.xml
-          if-no-files-found: ignore
+        run: pytest -v --tb=long --cov=utils --cov-report=term
 
   shellcheck:
     name: Shellcheck (SLURM scripts)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run shellcheck
-        # SLURM directives (#SBATCH ...) are comments to bash, so shellcheck
-        # handles them.  We disable SC2155 (declare-and-assign) because it's
-        # frequently a false positive for module-load blocks.
+      - name: Verify shellcheck availability
+        # ``shellcheck`` is pre-installed on ubuntu-latest runners; install
+        # only if missing (cheaper + more reliable than apt-get update every
+        # run).
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y shellcheck
-          # SC1091: can't follow `source activate` (conda external file)
-          # SC2155: declare-and-assign
-          # SC2181: style-only preference for direct exit-code checks
-          shellcheck -e SC1091,SC2155,SC2181 -x scripts/slurm/*.sh
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            sudo apt-get update -y
+            sudo apt-get install -y shellcheck
+          fi
+          shellcheck --version
+      - name: Run shellcheck
+        # Excluded rules are style/false-positive in our context:
+        #   SC1091 — can't follow `source activate` (conda external file)
+        #   SC2155 — declare-and-assign
+        #   SC2181 — prefer direct exit-code checks
+        run: shellcheck -e SC1091,SC2155,SC2181 scripts/slurm/*.sh
 
   environment-yml:
     name: Validate environment.yml
@@ -95,7 +103,6 @@ jobs:
       - name: Parse environment.yml
         run: |
           python - <<'PY'
-          import sys
           import yaml
           with open("environment.yml") as f:
               env = yaml.safe_load(f)

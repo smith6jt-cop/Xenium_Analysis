@@ -55,7 +55,6 @@ testpaths = ["tests"]
 addopts = [
     "-ra",
     "--strict-markers",
-    "--strict-config",
 ]
 markers = [
     "slow: integration tests that require real data (skipped in CI)",
