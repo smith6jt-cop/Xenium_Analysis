@@ -12,10 +12,10 @@ cd "$(dirname "$(readlink -f "$0")")/../.."
 mkdir -p logs
 
 ING=$(sbatch --parsable scripts/slurm/00_ingest_array.sh)
-PRE=$(sbatch --parsable --dependency=afterok:$ING scripts/slurm/01_preprocess_array.sh)
-PHE=$(sbatch --parsable --dependency=afterok:$PRE scripts/slurm/02_phenotype_array.sh)
-SPA=$(sbatch --parsable --dependency=afterok:$PHE scripts/slurm/03_spatial_array.sh)
-INT=$(sbatch --parsable --dependency=afterok:$PHE scripts/slurm/05_tissue_comparison.sh)
+PRE=$(sbatch --parsable --dependency="afterok:$ING" scripts/slurm/01_preprocess_array.sh)
+PHE=$(sbatch --parsable --dependency="afterok:$PRE" scripts/slurm/02_phenotype_array.sh)
+SPA=$(sbatch --parsable --dependency="afterok:$PHE" scripts/slurm/03_spatial_array.sh)
+INT=$(sbatch --parsable --dependency="afterok:$PHE" scripts/slurm/05_tissue_comparison.sh)
 
 cat <<EOF
 Submitted chained pipeline for samples 0041323, 0041326:

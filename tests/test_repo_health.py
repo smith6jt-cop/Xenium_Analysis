@@ -120,9 +120,22 @@ class TestEnvironmentYaml:
 
 SLURM_SCRIPTS = sorted(SLURM_DIR.glob("*.sh")) if SLURM_DIR.exists() else []
 
+# Not every shell script under ``scripts/slurm/`` is itself a ``sbatch`` job
+# -- some are orchestration / submitter scripts that only call ``sbatch``
+# under the hood (``run_all_samples.sh``).  The ``#SBATCH`` header marks
+# the ones that should satisfy the full set of batch-job invariants.
+def _is_batch_job(script: Path) -> bool:
+    text = script.read_text(errors="replace")
+    return "#SBATCH" in text
+
+
+BATCH_JOB_SCRIPTS = [s for s in SLURM_SCRIPTS if _is_batch_job(s)]
+
 
 @pytest.mark.parametrize("script", SLURM_SCRIPTS, ids=lambda p: p.name)
-class TestSlurmScripts:
+class TestShellHygiene:
+    """Basic shell hygiene that applies to any ``.sh`` under scripts/slurm/."""
+
     def test_shebang(self, script: Path):
         first = script.read_bytes().splitlines()[0]
         assert first.startswith(b"#!"), f"{script.name} missing shebang"
@@ -132,6 +145,15 @@ class TestSlurmScripts:
         """Scripts edited on Windows can pick up CRLF which SLURM rejects."""
         content = script.read_bytes()
         assert b"\r\n" not in content, f"{script.name} has CRLF line endings"
+
+
+@pytest.mark.parametrize("script", BATCH_JOB_SCRIPTS, ids=lambda p: p.name)
+class TestSlurmBatchJobs:
+    """Invariants that only apply to scripts with ``#SBATCH`` headers.
+
+    Orchestration-only scripts (no ``#SBATCH``) still get the basic shell
+    hygiene checks via :class:`TestShellHygiene`.
+    """
 
     def test_has_job_name(self, script: Path):
         text = script.read_text()
@@ -156,6 +178,12 @@ class TestSlurmScripts:
 
 def test_slurm_dir_has_scripts():
     assert SLURM_SCRIPTS, "expected at least one SLURM script under scripts/slurm/"
+
+
+def test_slurm_dir_has_batch_jobs():
+    assert BATCH_JOB_SCRIPTS, (
+        "expected at least one ``#SBATCH``-annotated script under scripts/slurm/"
+    )
 
 
 # ---------------------------------------------------------------------------
