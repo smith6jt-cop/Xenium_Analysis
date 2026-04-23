@@ -24,8 +24,8 @@ the groupings appear in the ``Clusters`` dropdown automatically.
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 import sys
+from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 if str(REPO) not in sys.path:

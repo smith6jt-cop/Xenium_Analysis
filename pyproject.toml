@@ -1,0 +1,69 @@
+[project]
+name = "xenium-analysis"
+version = "0.1.0"
+description = "Xenium spatial transcriptomics analysis pipeline (Linux + HiPerGator)."
+requires-python = ">=3.10"
+
+# The full runtime environment is provided by ``environment.yml`` (conda).
+# The dependencies listed here are only those needed to lint/test the pure
+# Python utilities in CI where a heavy scientific stack (scanpy, scvi-tools,
+# R) is impractical to install.
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = [
+    "notebooks",
+    "data",
+    "figures",
+    "logs",
+    "scripts/edit_notebook_04_subsample.py",
+    "scripts/fix_clustering_params.py",
+    "scripts/fix_deg_comprehensive.py",
+    "scripts/fix_deg_foldchanges.py",
+    "scripts/fix_preprocessing_params.py",
+    "scripts/fix_volcano_lfc.py",
+    "scripts/fix_volcano_plots.py",
+    "scripts/refactor_preprocessing_pipeline.py",
+]
+
+[tool.ruff.lint]
+# Enabled categories:
+#   E  - pycodestyle errors          W  - pycodestyle warnings
+#   F  - pyflakes                    I  - isort
+#   B  - bugbear                     UP - pyupgrade (modernization)
+select = ["E", "W", "F", "I", "B", "UP"]
+# Scientific-Python friendly relaxations.
+ignore = [
+    "E501",  # line length — matplotlib/scanpy kwargs produce long lines
+    "B008",  # function call in default arg — common for Path()
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests may redefine fixtures, shadow builtins, use assert freely.
+"tests/*" = ["B011", "B018"]
+# Notebook-editing helper scripts: one-off migration tools.
+"scripts/*.py" = ["E402"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+]
+markers = [
+    "slow: integration tests that require real data (skipped in CI)",
+    "gpu: tests that require a GPU (HiPerGator only)",
+    "hipergator: tests that only make sense on the HiPerGator cluster",
+]
+filterwarnings = [
+    # zarr 3 emits a FutureWarning for create_dataset which we handle via compat shim
+    "ignore::DeprecationWarning:zarr.*",
+    "ignore::FutureWarning:zarr.*",
+]

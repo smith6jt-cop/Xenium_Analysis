@@ -4,7 +4,6 @@ Verifies that the refactoring script correctly modified all three notebooks.
 """
 
 import json
-import re
 from pathlib import Path
 
 import pytest
@@ -42,6 +41,8 @@ def cell_source(nb, idx):
 @pytest.fixture(params=NOTEBOOKS, ids=lambda c: c["path"].name)
 def notebook_config(request):
     config = request.param
+    if not config["path"].exists():
+        pytest.skip(f"{config['path'].name} not present in this checkout")
     config["nb"] = load_notebook(config["path"])
     return config
 
@@ -167,7 +168,7 @@ class TestDownstreamCells:
         old_key = notebook_config["old_leiden_key"]
         nb = notebook_config["nb"]
         for i in range(20, len(nb["cells"])):
-            src = cell_source(nb, i)
+            cell_source(nb, i)
             # Allow it in output cells (which we may not have cleared) and markdown
             if nb["cells"][i]["cell_type"] != "code":
                 continue

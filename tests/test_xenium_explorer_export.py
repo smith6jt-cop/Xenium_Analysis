@@ -13,16 +13,15 @@ import pandas as pd
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
-UTILS = REPO / "utils"
-if str(UTILS) not in sys.path:
-    # Import the export module directly to avoid importing utils/__init__.py,
-    # which pulls in scanpy/squidpy that are unrelated to this test.
-    sys.path.insert(0, str(UTILS))
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
 
 anndata = pytest.importorskip("anndata")
 zarr = pytest.importorskip("zarr")
 
-from xenium_explorer_export import (  # noqa: E402
+# ``utils/__init__.py`` lazy-imports, so this works even when scanpy is not
+# installed (which is the case in GitHub Actions CI).
+from utils.xenium_explorer_export import (  # noqa: E402
     export_for_xenium_explorer,
     export_groups_to_csv,
     export_groups_to_zarr,

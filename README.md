@@ -372,6 +372,54 @@ python scripts/export_xenium_explorer_groups.py \
 > `analysis.zarr.zip` is position-indexed, so use it only when the AnnData
 > row order matches the original `cells.parquet` order.
 
+## Continuous Integration
+
+Two complementary layers of automated testing guard the repo:
+
+### GitHub Actions (lightweight, every push / PR)
+
+Defined in `.github/workflows/ci.yml`.  Runs on `ubuntu-latest` against
+Python 3.10 and 3.12 (matches the `environment.yml` pin).  Four jobs:
+
+| Job | What it does |
+|-----|--------------|
+| **lint** | `ruff check` on `utils/`, `scripts/`, `tests/` |
+| **test** | `pytest --cov=utils` with only `requirements-ci.txt` installed (no scanpy/scvi-tools) |
+| **shellcheck** | Static analysis of the SLURM scripts under `scripts/slurm/` |
+| **environment-yml** | Verifies `environment.yml` parses and pins Python 3.10+ |
+
+Total runtime: ~60s.  Heavy deps are deliberately not installed so PRs
+don't wait ten minutes on every push.
+
+### HiPerGator (full integration, on demand)
+
+```bash
+sbatch scripts/slurm/run_tests.sh
+```
+
+Activates the `xenium_analysis` conda env, runs lint + the fast suite,
+then the `@pytest.mark.slow` + `@pytest.mark.hipergator` tests that need
+real Xenium data.
+
+### Local pre-commit
+
+```bash
+pip install pre-commit && pre-commit install
+```
+
+Runs the same `ruff check`, shellcheck, trailing-whitespace, and
+LF-line-ending hooks on every commit — matches what CI enforces.
+
+### Running tests locally
+
+```bash
+# Fast tests only (what GitHub Actions runs)
+pytest
+
+# Include functional tests that need real data (HiPerGator)
+pytest --run-slow --run-hipergator
+```
+
 ## Utility Functions
 
 The `utils/analysis_utils.py` module provides reusable functions:

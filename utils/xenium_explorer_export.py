@@ -26,8 +26,8 @@ from __future__ import annotations
 import json
 import tempfile
 import zipfile
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Iterable, Mapping, Optional, Sequence, Union
 
 import numpy as np
 import pandas as pd
@@ -38,7 +38,7 @@ except ImportError:  # pragma: no cover - anndata is a hard dep elsewhere
     AnnData = "AnnData"  # type: ignore[assignment]
 
 
-PathLike = Union[str, Path]
+PathLike = str | Path
 
 # Xenium Explorer expects up to 8-bit RGB hex colors (``#RRGGBB``).
 _DEFAULT_PALETTE = "tab20"
@@ -48,7 +48,7 @@ _DEFAULT_PALETTE = "tab20"
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _resolve_cell_ids(adata: "AnnData", cell_id_key: Optional[str]) -> pd.Series:
+def _resolve_cell_ids(adata: AnnData, cell_id_key: str | None) -> pd.Series:
     """Return the series of cell ids matched to ``adata.obs``.
 
     Xenium Explorer matches rows by the ``cell_id`` column of the original
@@ -122,11 +122,11 @@ def generate_color_palette(
 # ---------------------------------------------------------------------------
 
 def export_groups_to_csv(
-    adata: "AnnData",
-    group_keys: Union[str, Iterable[str]],
+    adata: AnnData,
+    group_keys: str | Iterable[str],
     output_path: PathLike,
-    cell_id_key: Optional[str] = None,
-    rename: Optional[Mapping[str, str]] = None,
+    cell_id_key: str | None = None,
+    rename: Mapping[str, str] | None = None,
 ) -> Path:
     """Write a Xenium Explorer "Cell Groups" CSV.
 
@@ -264,12 +264,12 @@ def _write_cell_groups_zarr(
 
 
 def export_groups_to_zarr(
-    adata: "AnnData",
-    group_keys: Union[str, Iterable[str]],
+    adata: AnnData,
+    group_keys: str | Iterable[str],
     output_path: PathLike,
-    cell_id_key: Optional[str] = None,
-    rename: Optional[Mapping[str, str]] = None,
-    colors: Optional[Mapping[str, Mapping[str, str]]] = None,
+    cell_id_key: str | None = None,
+    rename: Mapping[str, str] | None = None,
+    colors: Mapping[str, Mapping[str, str]] | None = None,
     palette: str = _DEFAULT_PALETTE,
 ) -> Path:
     """Write an ``analysis.zarr.zip`` that Xenium Explorer picks up next to
@@ -372,13 +372,13 @@ def export_groups_to_zarr(
 # ---------------------------------------------------------------------------
 
 def export_for_xenium_explorer(
-    adata: "AnnData",
-    group_keys: Union[str, Iterable[str]],
+    adata: AnnData,
+    group_keys: str | Iterable[str],
     output_dir: PathLike,
     sample_name: str,
-    cell_id_key: Optional[str] = None,
-    rename: Optional[Mapping[str, str]] = None,
-    colors: Optional[Mapping[str, Mapping[str, str]]] = None,
+    cell_id_key: str | None = None,
+    rename: Mapping[str, str] | None = None,
+    colors: Mapping[str, Mapping[str, str]] | None = None,
     palette: str = _DEFAULT_PALETTE,
     write_csv: bool = True,
     write_zarr: bool = True,
