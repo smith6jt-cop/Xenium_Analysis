@@ -1,0 +1,141 @@
+name: CI
+
+# The full scientific stack (scanpy, scvi-tools, R/Seurat, napari, ...) is too
+# heavy to reinstall on every push, so CI runs a deliberately lightweight
+# slice: lint + repo-health + unit tests for the pure-Python utilities.
+# Full integration tests (with real Xenium data) run on HiPerGator via
+# ``scripts/slurm/run_tests.sh``.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+      - name: Install ruff
+        run: python -m pip install --upgrade pip && pip install -r requirements-ci.txt
+      - name: ruff check
+        run: ruff check .
+
+  test:
+    name: Unit tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+      - name: Install CI deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+      - name: Diagnostic dump
+        run: |
+          echo "::group::Python + pip"
+          python -V
+          which python
+          pip list
+          echo "::endgroup::"
+          echo "::group::sys.path"
+          python -c "import sys; [print(p) for p in sys.path]"
+          echo "::endgroup::"
+      - name: pytest
+        # Run pytest, capture stdout+stderr, and if it fails emit the tail
+        # as ::error:: annotations so the failure is visible on the public
+        # run summary page.
+        run: |
+          set +e
+          pytest -v --tb=long --cov=utils --cov-report=term 2>&1 | tee pytest.out
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" != "0" ]; then
+            echo "::group::pytest tail"
+            tail -80 pytest.out
+            echo "::endgroup::"
+            # Emit the last failure line + short context as annotations
+            awk '/^FAILED|^ERROR|^E  |^_+ / {print}' pytest.out | while IFS= read -r line; do
+              # Strip the leading underscores separator lines to one per failure
+              echo "::error::${line}"
+            done
+            echo "::error::pytest exited with code ${rc}"
+          fi
+          exit "$rc"
+
+  shellcheck:
+    name: Shellcheck (SLURM scripts)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify shellcheck availability
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            sudo apt-get update -y
+            sudo apt-get install -y shellcheck
+          fi
+          shellcheck --version
+      - name: Run shellcheck
+        # Excluded rules are style/false-positive in our context:
+        #   SC1091 — can't follow `source activate` (conda external file)
+        #   SC2155 — declare-and-assign
+        #   SC2181 — prefer direct exit-code checks
+        # On failure we emit the raw shellcheck output as ::error::
+        # annotations so the public PR summary shows which script broke.
+        run: |
+          set +e
+          shellcheck -e SC1091,SC2155,SC2181 scripts/slurm/*.sh 2>&1 | tee shellcheck.out
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" != "0" ]; then
+            while IFS= read -r line; do
+              [ -z "$line" ] && continue
+              echo "::error::${line}"
+            done < shellcheck.out
+            echo "::error::shellcheck exited with code ${rc}"
+          fi
+          exit "$rc"
+
+  environment-yml:
+    name: Validate environment.yml
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pyyaml
+        run: pip install pyyaml
+      - name: Parse environment.yml
+        run: |
+          python - <<'PY'
+          import yaml
+          with open("environment.yml") as f:
+              env = yaml.safe_load(f)
+          assert env["name"] == "xenium_analysis", env.get("name")
+          deps = env["dependencies"]
+          py = next((d for d in deps if isinstance(d, str) and d.startswith("python")), None)
+          assert py, "environment.yml must pin a python version"
+          print("OK:", py)
+          PY

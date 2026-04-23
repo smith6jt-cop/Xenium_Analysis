@@ -1,0 +1,15 @@
+# Minimal dependencies for running lint + fast unit tests in GitHub Actions.
+#
+# The full runtime environment (scanpy, scvi-tools, R, spatialdata-io, napari,
+# ...) is in ``environment.yml`` and is only used on HiPerGator / local dev
+# machines. Keeping CI light means pull-request checks finish in <2 min.
+
+numpy>=1.24
+pandas>=2.0
+anndata>=0.10
+zarr>=2.16
+matplotlib>=3.7
+pytest>=7.4
+pytest-cov>=4.1
+ruff>=0.6
+nbformat>=5.9

@@ -66,6 +66,43 @@ data/processed/
 └── integrated_tissues.h5ad              # After multi-tissue integration
 ```
 
+## Xenium Explorer Export (`data/xenium_explorer/`)
+
+After phenotyping, clusters and phenotypes can be exported back to
+Xenium Explorer via `utils.xenium_explorer_export` (see the main README's
+[*Exporting Clusters / Phenotypes to Xenium Explorer*](README.md#exporting-clusters--phenotypes-to-xenium-explorer)
+section). The default output directory layout is:
+
+```
+data/xenium_explorer/
+├── sample_01_cell_groups.csv         # Load: Cell -> Add cell categorization
+├── sample_01_color_palette.json      # {grouping: {category: '#RRGGBB'}}
+└── sample_01/
+    └── analysis.zarr.zip             # Copy next to experiment.xenium
+```
+
+- **`*_cell_groups.csv`** — first column `cell_id`, one column per
+  exported grouping (`leiden_0.5`, `celltype`, `phenotype`, ...). Matched
+  by `cell_id` so it's safe after any filtering or reordering.
+- **`<sample>/analysis.zarr.zip`** — native Xenium Explorer analysis
+  bundle in zarr v2 layout. Position-indexed — only use if the AnnData
+  row order still matches the original `cells.parquet`.
+- **`*_color_palette.json`** — category-to-hex-color map. Reuse it when
+  plotting in Python so figures match what Xenium Explorer shows.
+
+Generate with either:
+
+```python
+from utils import export_for_xenium_explorer
+export_for_xenium_explorer(adata, group_keys=[...], output_dir=..., sample_name=...)
+```
+
+or from the CLI:
+
+```bash
+python scripts/export_xenium_explorer_groups.py -i ... -o ... -s ... -g ...
+```
+
 ## Phenocycler Data (`data/phenocycler/`)
 
 ### Expected Format

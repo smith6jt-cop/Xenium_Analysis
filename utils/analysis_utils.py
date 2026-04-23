@@ -2,13 +2,11 @@
 Utility functions for Xenium spatial transcriptomics analysis
 """
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import scanpy as sc
-import squidpy as sq
-from pathlib import Path
-from typing import Optional, List, Dict, Tuple
-import warnings
 
 
 def load_xenium_data(
@@ -18,7 +16,7 @@ def load_xenium_data(
 ) -> sc.AnnData:
     """
     Load Xenium data from various file formats.
-    
+
     Parameters
     ----------
     data_path : Path
@@ -27,13 +25,13 @@ def load_xenium_data(
         Sample identifier
     file_type : str
         File format ('h5ad', 'h5', 'csv')
-        
+
     Returns
     -------
     AnnData object
     """
     file_path = data_path / f"{sample_name}.{file_type}"
-    
+
     if file_type == "h5ad":
         adata = sc.read_h5ad(file_path)
     elif file_type == "h5":
@@ -42,19 +40,19 @@ def load_xenium_data(
         adata = sc.read_csv(file_path)
     else:
         raise ValueError(f"Unsupported file type: {file_type}")
-    
+
     return adata
 
 
 def add_spatial_coordinates(
     adata: sc.AnnData,
-    coords_file: Optional[Path] = None,
+    coords_file: Path | None = None,
     x_col: str = "x",
     y_col: str = "y"
 ) -> sc.AnnData:
     """
     Add spatial coordinates to AnnData object.
-    
+
     Parameters
     ----------
     adata : AnnData
@@ -65,7 +63,7 @@ def add_spatial_coordinates(
         Column name for x coordinates
     y_col : str
         Column name for y coordinates
-        
+
     Returns
     -------
     AnnData with spatial coordinates in obsm['spatial']
@@ -79,7 +77,7 @@ def add_spatial_coordinates(
             spatial_coords = adata.obs[[x_col, y_col]].values
         else:
             raise ValueError("Spatial coordinates not found")
-    
+
     adata.obsm['spatial'] = spatial_coords
     return adata
 
@@ -87,11 +85,11 @@ def add_spatial_coordinates(
 def calculate_qc_metrics(
     adata: sc.AnnData,
     mt_prefix: str = "MT-",
-    ribo_prefix: Tuple[str, str] = ("RPS", "RPL")
+    ribo_prefix: tuple[str, str] = ("RPS", "RPL")
 ) -> sc.AnnData:
     """
     Calculate comprehensive QC metrics.
-    
+
     Parameters
     ----------
     adata : AnnData
@@ -100,7 +98,7 @@ def calculate_qc_metrics(
         Prefix for mitochondrial genes
     ribo_prefix : tuple
         Prefixes for ribosomal genes
-        
+
     Returns
     -------
     AnnData with QC metrics in obs
@@ -108,7 +106,7 @@ def calculate_qc_metrics(
     # Identify gene types
     adata.var['mt'] = adata.var_names.str.startswith(mt_prefix)
     adata.var['ribo'] = adata.var_names.str.startswith(ribo_prefix)
-    
+
     # Calculate metrics
     sc.pp.calculate_qc_metrics(
         adata,
@@ -117,7 +115,7 @@ def calculate_qc_metrics(
         log1p=False,
         inplace=True
     )
-    
+
     return adata
 
 
@@ -130,7 +128,7 @@ def filter_cells_and_genes(
 ) -> sc.AnnData:
     """
     Filter low-quality cells and genes.
-    
+
     Parameters
     ----------
     adata : AnnData
@@ -143,25 +141,25 @@ def filter_cells_and_genes(
         Maximum mitochondrial percentage
     min_counts : int
         Minimum UMI counts per cell
-        
+
     Returns
     -------
     Filtered AnnData
     """
     n_cells_before = adata.n_obs
     n_genes_before = adata.n_vars
-    
+
     # Filter
     sc.pp.filter_cells(adata, min_genes=min_genes)
     sc.pp.filter_cells(adata, min_counts=min_counts)
     sc.pp.filter_genes(adata, min_cells=min_cells)
-    
+
     if 'pct_counts_mt' in adata.obs:
         adata = adata[adata.obs.pct_counts_mt < max_mt_pct, :].copy()
-    
+
     print(f"Filtered: {n_cells_before - adata.n_obs} cells, "
           f"{n_genes_before - adata.n_vars} genes")
-    
+
     return adata
 
 
@@ -173,7 +171,7 @@ def normalize_and_hvg(
 ) -> sc.AnnData:
     """
     Normalize data and identify highly variable genes.
-    
+
     Parameters
     ----------
     adata : AnnData
@@ -184,19 +182,19 @@ def normalize_and_hvg(
         Number of highly variable genes
     flavor : str
         Method for HVG selection
-        
+
     Returns
     -------
     Normalized AnnData with HVG annotation
     """
     # Store raw counts
     adata.layers['counts'] = adata.X.copy()
-    
+
     # Normalize
     sc.pp.normalize_total(adata, target_sum=target_sum)
     sc.pp.log1p(adata)
     adata.layers['log1p_norm'] = adata.X.copy()
-    
+
     # Identify HVGs
     sc.pp.highly_variable_genes(
         adata,
@@ -204,7 +202,7 @@ def normalize_and_hvg(
         flavor=flavor,
         subset=False
     )
-    
+
     return adata
 
 
@@ -216,7 +214,7 @@ def run_standard_workflow(
 ) -> sc.AnnData:
     """
     Run standard scanpy workflow: scaling, PCA, neighbors, UMAP, clustering.
-    
+
     Parameters
     ----------
     adata : AnnData
@@ -227,24 +225,24 @@ def run_standard_workflow(
         Number of neighbors for graph
     resolution : float
         Resolution for Leiden clustering
-        
+
     Returns
     -------
     AnnData with embeddings and clusters
     """
     # Scale
     sc.pp.scale(adata, max_value=10)
-    
+
     # PCA
     sc.tl.pca(adata, svd_solver='arpack', n_comps=n_pcs)
-    
+
     # Neighbors and UMAP
     sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=min(30, n_pcs))
     sc.tl.umap(adata)
-    
+
     # Clustering
     sc.tl.leiden(adata, resolution=resolution)
-    
+
     return adata
 
 
@@ -256,7 +254,7 @@ def export_to_csv(
 ) -> None:
     """
     Export AnnData to CSV files.
-    
+
     Parameters
     ----------
     adata : AnnData
@@ -269,10 +267,10 @@ def export_to_csv(
         Whether to include spatial coordinates
     """
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Export metadata
     adata.obs.to_csv(output_dir / f"{sample_name}_metadata.csv")
-    
+
     # Export expression matrix
     expr_df = pd.DataFrame(
         adata.X.toarray() if hasattr(adata.X, 'toarray') else adata.X,
@@ -280,7 +278,7 @@ def export_to_csv(
         columns=adata.var_names
     )
     expr_df.to_csv(output_dir / f"{sample_name}_expression.csv")
-    
+
     # Export spatial coordinates if available
     if include_spatial and 'spatial' in adata.obsm:
         spatial_df = pd.DataFrame(
@@ -289,7 +287,7 @@ def export_to_csv(
             columns=['x', 'y']
         )
         spatial_df.to_csv(output_dir / f"{sample_name}_spatial_coords.csv")
-    
+
     print(f"Exported data to {output_dir}")
 
 
@@ -300,7 +298,7 @@ def create_summary_report(
 ) -> pd.DataFrame:
     """
     Create a summary report of the dataset.
-    
+
     Parameters
     ----------
     adata : AnnData
@@ -309,7 +307,7 @@ def create_summary_report(
         Sample identifier
     output_file : Path
         Output file path
-        
+
     Returns
     -------
     DataFrame with summary statistics
@@ -324,11 +322,11 @@ def create_summary_report(
         'Has spatial coords': 'spatial' in adata.obsm,
         'Has cell types': 'celltype' in adata.obs,
     }
-    
+
     summary_df = pd.DataFrame([summary]).T
     summary_df.columns = ['Value']
-    
+
     if output_file:
         summary_df.to_csv(output_file)
-    
+
     return summary_df

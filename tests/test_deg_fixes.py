@@ -11,7 +11,6 @@ Run with:
 """
 
 import json
-import re
 from pathlib import Path
 
 import numpy as np
@@ -56,6 +55,8 @@ class TestNotebookStructure:
     def nb_info(self, request):
         name = request.param
         nb_path, deg_idx, vol_idx = NOTEBOOKS[name]
+        if not nb_path.exists():
+            pytest.skip(f"{nb_path.name} not present in this checkout")
         nb = _load_nb(nb_path)
         return name, nb, deg_idx, vol_idx
 
@@ -134,8 +135,13 @@ class TestNotebookStructure:
 # 2. Functional tests — run the fixed pipeline on actual data
 # ---------------------------------------------------------------------------
 
+@pytest.mark.slow
 class TestDEGFunctional:
-    """Run the fixed DEG pipeline on actual data and verify outputs."""
+    """Run the fixed DEG pipeline on actual data and verify outputs.
+
+    Marked ``slow`` so CI skips it by default.  Run on HiPerGator with
+    ``pytest --run-slow``.
+    """
 
     @pytest.fixture(scope="class")
     def deg_results(self):
@@ -204,7 +210,7 @@ class TestDEGFunctional:
 
             lfc = np.log2(mean_in + 1e-2) - np.log2(mean_out + 1e-2)
 
-            gene_to_lfc = dict(zip(gene_names, lfc))
+            gene_to_lfc = dict(zip(gene_names, lfc, strict=False))
             ranked_genes = rgg["names"][group_name]
             rgg["logfoldchanges"][group_name] = np.array(
                 [gene_to_lfc[g] for g in ranked_genes], dtype="float32"
@@ -238,7 +244,7 @@ class TestDEGFunctional:
 
     def test_subsample_minimum_respected(self, deg_results):
         """Clusters with ≥50 cells should have at least 50 in the subsample."""
-        for group, n in deg_results["cluster_sizes"].items():
+        for _group, _n in deg_results["cluster_sizes"].items():
             # Can only enforce minimum if the cluster actually has ≥50 cells
             # (small clusters are allowed to have fewer)
             pass  # validated by the cap test; minimum is max(50, actual)

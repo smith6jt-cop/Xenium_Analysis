@@ -1,0 +1,36 @@
+# Pre-commit hooks: ``pre-commit install`` once, then every ``git commit``
+# runs these locally.  Matches what CI runs, so a clean commit implies a
+# clean CI.
+#
+# We deliberately exclude .ipynb files: notebooks are edited interactively
+# and their JSON is touched on every kernel run, which makes formatting
+# hooks very noisy.
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.ipynb$'
+      - id: end-of-file-fixer
+        exclude: '\.ipynb$'
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
+        # SLURM scripts must always use LF; Windows editors sometimes flip them.
+        files: '\.(sh|py|ya?ml|toml|ini|md)$'
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+        args: [-e, "SC1091,SC2155,SC2181", -x]
+        files: '^scripts/slurm/.*\.sh$'
