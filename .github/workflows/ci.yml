@@ -42,9 +42,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # HiPerGator conda env uses 3.12; we also verify 3.10 (the project
-        # minimum declared in pyproject.toml) so contributors on older
-        # systems don't silently break things.
         python-version: ["3.10", "3.12"]
     steps:
       - uses: actions/checkout@v4
@@ -58,15 +55,35 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-ci.txt
       - name: Diagnostic dump
-        # Prints the effective test environment so any future CI failures
-        # can be debugged from the log without reproducing locally.
         run: |
+          echo "::group::Python + pip"
           python -V
           which python
           pip list
-          python -c "import sys; print('sys.path:'); [print(' ', p) for p in sys.path]"
+          echo "::endgroup::"
+          echo "::group::sys.path"
+          python -c "import sys; [print(p) for p in sys.path]"
+          echo "::endgroup::"
       - name: pytest
-        run: pytest -v --tb=long --cov=utils --cov-report=term
+        # Run pytest, capture stdout+stderr, and if it fails emit the tail
+        # as ::error:: annotations so the failure is visible on the public
+        # run summary page.
+        run: |
+          set +e
+          pytest -v --tb=long --cov=utils --cov-report=term 2>&1 | tee pytest.out
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" != "0" ]; then
+            echo "::group::pytest tail"
+            tail -80 pytest.out
+            echo "::endgroup::"
+            # Emit the last failure line + short context as annotations
+            awk '/^FAILED|^ERROR|^E  |^_+ / {print}' pytest.out | while IFS= read -r line; do
+              # Strip the leading underscores separator lines to one per failure
+              echo "::error::${line}"
+            done
+            echo "::error::pytest exited with code ${rc}"
+          fi
+          exit "$rc"
 
   shellcheck:
     name: Shellcheck (SLURM scripts)
@@ -74,9 +91,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Verify shellcheck availability
-        # ``shellcheck`` is pre-installed on ubuntu-latest runners; install
-        # only if missing (cheaper + more reliable than apt-get update every
-        # run).
         run: |
           if ! command -v shellcheck >/dev/null 2>&1; then
             sudo apt-get update -y
@@ -88,7 +102,20 @@ jobs:
         #   SC1091 — can't follow `source activate` (conda external file)
         #   SC2155 — declare-and-assign
         #   SC2181 — prefer direct exit-code checks
-        run: shellcheck -e SC1091,SC2155,SC2181 scripts/slurm/*.sh
+        # On failure we emit the raw shellcheck output as ::error::
+        # annotations so the public PR summary shows which script broke.
+        run: |
+          set +e
+          shellcheck -e SC1091,SC2155,SC2181 scripts/slurm/*.sh 2>&1 | tee shellcheck.out
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" != "0" ]; then
+            while IFS= read -r line; do
+              [ -z "$line" ] && continue
+              echo "::error::${line}"
+            done < shellcheck.out
+            echo "::error::shellcheck exited with code ${rc}"
+          fi
+          exit "$rc"
 
   environment-yml:
     name: Validate environment.yml
