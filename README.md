@@ -6,6 +6,12 @@ Optimized for Linux workstations and the University of Florida HiPerGator
 HPC cluster, with scanpy / squidpy / scvi-tools on the Python side and
 Seurat on the R side.
 
+> **Resuming work?** Read [`HANDOFF.md`](HANDOFF.md) for the current
+> pipeline state and how to pick up after a disconnect.
+>
+> **New contributor (or AI agent)?** Read [`CLAUDE.md`](CLAUDE.md) for
+> the architectural guide and what NOT to regress.
+
 ## Table of Contents
 - [Features](#features)
 - [Installation](#installation)

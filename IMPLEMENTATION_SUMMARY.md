@@ -9,29 +9,75 @@ and SLURM infrastructure for the University of Florida HiPerGator cluster.
 
 ## What Has Been Implemented
 
-### Core Analysis Pipeline (6 Jupyter Notebooks)
+### Core Analysis Pipeline
 
-#### 1. Preprocessing (`01_preprocessing.ipynb`, plus `_v2` and `_panc` variants)
-- Input: raw h5 / h5ad files from Xenium
-- Processing: QC metrics (genes/cell, counts, mt%), cell/gene filtering,
-  normalization (log1p), highly-variable genes, PCA, UMAP, Leiden
-- Output: `*_preprocessed.h5ad`
+> **For pickup after disconnect, see [`HANDOFF.md`](HANDOFF.md) first.**
+> For architectural decisions and structure, see [`CLAUDE.md`](CLAUDE.md).
 
-#### 2. Phenotyping (`02_phenotyping.ipynb`)
-- Marker-gene identification and scoring
-- Automated annotation with tunable markers
-- scVI-based advanced clustering
-- Output: `*_annotated.h5ad`
+#### 1. Preprocessing (`01_preprocessing_v2.ipynb`) — **OPTIONAL**
+- Input: spatialdata zarr (`data/raw/{sample}.zarr`)
+- Processing (10x-aligned QC): drop control probes, `min_counts=50`,
+  `min_genes=20`, adaptive `max_counts=98%-ile`, `min_cells=100`;
+  `normalize_total` (median target), `log1p`; HVG (seurat_v3, metadata
+  only — PCA uses all panel genes); `sc.pp.scale(zero_center=False)`
+  to keep matrix sparse; randomized-SVD PCA `n_comps=30`,
+  `random_state=0`; cosine neighbors, `min_dist=0.5` UMAP, `igraph`
+  leiden with `n_iterations=-1`. Squidpy decorative stats
+  (centrality / nhood_enrichment permutations / Moran's I) are
+  **skipped** at this scale.
+- Output: `data/processed/{sample}/{sample}_preprocessed.h5ad` (~100 GB)
+- **Not required**: stage 02 ingests directly from zarr (cell 3
+  has a standalone branch).
+- Legacy variants (`01_preprocessing.ipynb`,
+  `01_preprocessing_panc.ipynb`) live under
+  `notebooks/legacy/` and must not be run.
+
+#### 2. Phenotyping (`02_phenotyping.ipynb`) — **PRIMARY ENTRY POINT**
+- Input: zarr OR `_preprocessed.h5ad` (auto-detected in cell 3)
+- Panel-aware pancreas marker dict (cell 10) — explicitly omits
+  `INS / GCG / SST / PPY / TTR / IRX2` and most acinar zymogens that are
+  absent from the T1D add-on panel; uses surrogates for Beta/Alpha/
+  Delta/Epsilon. `LOW_CONFIDENCE_TYPES = {Alpha, Delta, Epsilon, Acinar}`.
+- Score-based assignment with **anti-acinar override** (cell 15) —
+  the Xenium panel has only `AMY1A` for Acinar, so an extra pass
+  reassigns Acinar-called cells whenever curated specific markers of
+  another lineage (Beta/Endocrine/Ductal/Stellate/Endothelial/
+  T_cells/B_cells/Myeloid/Schwann) exceed their per-type baseline.
+- Confidence-based Indeterminate flagging (median - 1·MAD on
+  `celltype_confidence`) for low-coverage types — runs AFTER override.
+- scVI training (cell 17): `layer='counts'`, `n_latent=30`,
+  `gene_likelihood='nb'`, `continuous_covariate_keys=['cell_area']`
+  (NO `total_counts` — NB likelihood already models library size),
+  GPU when available, `max_epochs=200` with early stopping.
+- scanpy CPU UMAP + leiden on `X_scvi` (cosine, `min_dist=0.5`,
+  `random_state=0`, leiden resolution 1.0).
+- Quantitative validation: Spearman ρ between each UMAP axis and
+  `total_counts` rendered to `umap_qc_overlay.png`. Both samples
+  currently < 0.3 (passing).
+- 10x-canonical PCA-fallback embedding stored as `X_umap_pca` /
+  `leiden_pca` for independent sanity check.
+- Output: `data/processed/{sample}/{sample}_phenotyped.h5ad` (~60 GB)
 - Recommended follow-up: call `utils.export_for_xenium_explorer()` to push
   clusters / phenotypes straight into Xenium Explorer (see the Xenium
   Explorer Export Module section below)
 
 #### 3. Spatial Analysis (`03_spatial_analysis.ipynb`)
-- Spatial neighborhood graph
-- Neighborhood enrichment, co-occurrence, Moran's I
-- Spatial domain identification
-- Ligand-receptor analysis, Ripley's L
-- Output: `*_spatial_analysis.h5ad`
+- Cell 2 slim adata (drop heavy obsm/obsp/uns we don't need at this stage)
+- Cell 4 `sq.gr.spatial_neighbors(n_neighs=10, delaunay=True)` on full data
+- Cell 6 `sq.gr.nhood_enrichment(n_perms=100, n_jobs=1, seed=0)` —
+  `n_jobs>1` hits a numba/joblib readonly-array bug; sequential with
+  reduced perms gives same statistical resolution
+- Cell 8 co-occurrence on 150 k subsample
+- Cell 10 Moran's I (`spatial_autocorr`) on 200 k subsample, top 100
+  genes, `n_jobs=16`
+- Cell 12 spatial niches via composition kmeans + 2-pass spatial
+  smoothing (Banksy-style)
+- Cell 14 `sq.gr.ligrec` on 100 k subsample, n_perms=50
+- Cell 16 `sq.gr.ripley` on 100 k subsample
+- Cell 18 defensive try/except CSV exports + h5ad save
+- Output: `data/processed/{sample}/{sample}_spatial_analysis.h5ad` (~10 GB)
+  + per-sample CSVs (ligrec means/pvalues/metadata, neighborhood_enrichment,
+  moranI, spatial_niches)
 
 #### 4. Group Comparisons (`04_group_comparisons.ipynb`)
 - Cell-type composition, statistical testing
@@ -243,17 +289,29 @@ ruff check .
 pytest
 ```
 
-## File Inventory
+## File Inventory (post-2026-04-25 cleanup)
 
-- Notebooks: 8 (`01_preprocessing` + two variants, `02`–`06`)
+- Notebooks (active): 7 (`00_ingest`, `01_preprocessing_v2`, `02`–`06`)
+- Notebooks (legacy, deprecated): 2 under `notebooks/legacy/`
+  (`01_preprocessing.ipynb`, `01_preprocessing_panc.ipynb`)
 - SLURM scripts: 5 (4 pipeline + `run_tests.sh`)
-- Python packages: `utils/` (2 submodules), `scripts/` (CLI + refactor
-  helpers), `tests/` (4 test modules + conftest)
+- Python scripts (active): 3 — `run_local_pipeline.sh`,
+  `slim_phenotyped.py`, `export_xenium_explorer_groups.py`
+- Python scripts (legacy, deprecated): 13 under `scripts/legacy/`
+  (one-shot fix-ups from iterative debugging — see
+  `scripts/legacy/README.md` for what each replaced)
+- Utils: `utils/` (2 submodules)
+- Tests: `tests/` (4 test modules + conftest)
 - CI: GitHub Actions workflow, pre-commit config, pyproject.toml,
   requirements-ci.txt
 - R scripts: `scripts/R/xenium_analysis.R`
-- Documentation: `README.md`, `DATA_README.md`,
-  `IMPLEMENTATION_SUMMARY.md`, `config.ini`
+- Documentation:
+  - `HANDOFF.md` — per-session pickup notes (read first after disconnect)
+  - `CLAUDE.md` — repo guide for Claude / new contributors
+  - `README.md` — user-facing overview
+  - `DATA_README.md` — expected data formats + Xenium Explorer outputs
+  - `IMPLEMENTATION_SUMMARY.md` — this file
+  - `config.ini` — parameter template (panel-aware pancreas markers)
 
 ## Future Extensions
 
