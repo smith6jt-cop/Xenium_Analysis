@@ -457,7 +457,153 @@ Headline files now:
 | `data/processed/islets_dbscan.csv` | endo-label seed islets (was strict-seed) |
 | `*_strict.csv` | original strict-seed tables, archived |
 
-Findings: **0041326 = 99.4% insulitis (316/318 islets)**, mean 42 immune
-cells/islet zone, dominated by Macro_M2 + T_reg + T_cytotoxic.
-**0041323 = 16.6% insulitis (44/265 islets)**, with subtle DC enrichment
-(2.51x) at the few infiltrated ones. Active vs quiescent T1D signature.
+Findings (**SUPERSEDED — see 2026-04-28 entry below**): 0041326 = 99.4%
+insulitis (316/318 islets), 0041323 = 16.6% insulitis. Those numbers came
+from an earlier immune-gating version (mean 42 immune cells/islet) that
+no longer matches the current `*_immune_phenotyped.h5ad` (mean ~10
+cells/islet). On the current immune set, the CT-3/6 absolute grade is
+60.8% / 66.7% — much closer between samples — and the per-phenotype
+rotation-null grades (the new headline) are 0–4% by subtype.
+
+### 2026-04-28 update — per-phenotype dynamic insulitis grading
+
+The single CT-3/6 absolute grade above flattens 0041326 to "everything is
+insulitis". User asked for a size-, composition-, and immune-type-aware
+replacement. `scripts/insulitis_analysis.py` rewritten to:
+
+1. **Composition per islet** from per-cell `Beta_score` / `Alpha_score` /
+   `Delta_score` (already present in `_phenotyped.h5ad` from stage 02 cell 13).
+   Argmax with margin ≥ 0.1 else `Endo_unresolved`. `composition_class` ∈
+   {Beta_rich, Alpha_rich, Delta_rich, Mixed} per 60% threshold.
+2. **Per-phenotype rotation null** (1000 rotations of immune xy around the
+   clustered-seed centroid) for each of 12 immune subtypes
+   (`B_pan`, `B_plasma`, `DC`, `Macro_M1`, `Macro_M2`, `Macro_resident`,
+   `Monocyte`, `NK`, `T_cytotoxic`, `T_exhausted`, `T_helper`, `T_reg`).
+   Acinar/Schwann/Endothelial leakage dropped from immune count.
+3. **Per-stratum thresholds**: `(sample × size_class)` with 5 size bins
+   (`tiny ≤20`, `small 21-50`, `med 51-100`, `large 101-200`, `xl >200`),
+   pooled per-100-endocrine null values, 95th / 99th percentile →
+   `thresh_peri` / `thresh_insulitis`.
+4. **Per-phenotype grade** per islet — independent {no, peri, insulitis}
+   grade for each subtype, plus the CT-3/6 absolute grade preserved on
+   `total_immune`. **Singular `insulitis_grade` column dropped.**
+5. **Descriptive logistic regression** per (sample × subtype) with odds
+   ratios + 95% CI, NO p-values (n=2 caveat).
+
+#### New / changed CSVs (single writer = `insulitis_grade_absolute.py`)
+
+| File | Schema |
+|---|---|
+| `islet_infiltration_per100endo.csv` | per-islet, 53 cols incl. `<S>_zone`, `<S>_per100endo`, `<S>_grade` for each of 12 subtypes, plus `composition_class`, `size_class`, `total_immune`, `total_per100endo`, `insulitis_grade_absolute` |
+| `islet_insulitis_grades.csv` | long format: `sample, subtype, no_insulitis, peri_insulitis, insulitis, total_islets, pct_insulitis, pct_peri_or_insulitis` — 26 rows (2 samples × 13 = 12 subtypes + `absolute_total`) |
+| `islet_insulitis_thresholds.csv` | NEW — `sample, size_class, subtype, n_islets, n_null_samples, thresh_peri, thresh_insulitis` (120 rows) |
+| `islet_insulitis_regression.csv` | NEW — `sample, subtype, term, odds_ratio, ci_low, ci_high` (no p-values) |
+| `*_preweighted.csv` | one-shot archive of pre-rewrite headline CSVs |
+
+#### Findings (current run, 2026-04-28)
+
+| Subtype | 0041323 % insulitis | 0041326 % insulitis |
+|---|---:|---:|
+| absolute_total (CT 3/6) | 60.8% (161/265) | 66.7% (212/318) |
+| NK | 2.3% | 3.8% |
+| Monocyte | 2.3% | 3.1% |
+| T_helper | 2.3% | 2.2% |
+| T_cytotoxic | 0.4% | 2.2% |
+| DC | 1.5% | 1.6% |
+| (others) | 0–1% | 0–1% |
+
+The "99.4% / 16.6%" headlines from the 2026-04-27 entry above are **stale**
+— they were computed from an earlier immune-gating version (mean 42
+immune cells/islet) that no longer matches the current
+`*_immune_phenotyped.h5ad` (mean ~10 cells/islet). The CT-3/6 absolute
+grade on the current immune set is 60.8% / 66.7% — much closer between
+samples than the prior headline suggested.
+
+Per-phenotype prevalences are intentionally conservative — the
+rotation-null 99th-percentile threshold flags only islets that are
+statistically elevated *for that subtype × size_class stratum* relative
+to the same sample's immune-density background. To loosen, drop the
+threshold percentile in `insulitis_analysis.py` (currently 95/99 for
+peri/insulitis; try 90/95 for a more permissive cut).
+
+#### Composition findings
+
+- 0041323: 64 Beta_rich islets (24%), 200 Mixed (76%), 1 Alpha_rich.
+- 0041326: 6 Beta_rich (2%), 5 Alpha_rich (2%), 307 Mixed (96%) — β-cell
+  identity loss consistent with more-advanced T1D progression.
+
+#### Rotation-null caveat
+
+Rotation around the clustered-seed centroid means rotated immune cells
+can land outside the original tissue convex hull. Those positions
+contribute zero to per-islet zone counts, biasing the null *low* and
+making real-vs-null gaps look slightly larger than reality. A
+tissue-mask-aware permutation would fix this; v1 does not implement it.
+
+#### Duplicate-writer reconciliation
+
+`scripts/rerun_immune_pipeline.py` step 6 now early-exits with a
+redirect message; `scripts/build_notebook_07.py` writes its derivatives
+to `*_legacy_notebook07.csv` so headline CSVs aren't silently
+overwritten with the old schema.
+
+#### Known follow-up
+
+- Some per-(sample × subtype) regressions hit `LinAlgError: Singular
+  matrix` because of perfect separation in small composition strata
+  (e.g. 0041326 has only 5 Alpha_rich islets). Skipped silently; not a
+  blocker.
+- Per-phenotype thresholds may be too strict if the user's question is
+  "where is *any* T-cell signal elevated"; loosen percentile or fold
+  T_cytotoxic + T_exhausted into a single `T_effector` aggregate column
+  if that question becomes important.
+
+### 2026-04-28 (later) — Epsilon mislabel + full reanalysis pending
+
+#### What's broken in the current saved h5ads
+
+`scripts/audit_panel_exclusions.py` + manual review surfaced two structural
+issues with the current `_phenotyped.h5ad` files:
+
+1. **150,230 cells in 0041326 mislabeled `Epsilon`.** Cause: the stage 02
+   cell 10 marker dict had `'Epsilon': ['GHRL']` — a 1-gene "panel".
+   Under detection asymmetry (0041326 has lower per-cell detection),
+   the score_genes argmax overweights single-gene panels relative to
+   multi-gene panels. Result: ~13% of all cells in 0041326 got
+   argmax-mislabeled Epsilon. 0041323 has 0 Epsilon (correct).
+2. **Donor sex differs between samples.** KDM5D = 10.3% in 0041326 vs
+   0.010% in 0041323; DDX3Y = 7.7% vs 0.017%. **0041326 is male,
+   0041323 is female.** Y-chromosome variance is leaking into PCA, scVI,
+   UMAP, leiden, and likely contaminating cell-type calls beyond
+   Epsilon.
+
+#### Resolution path — full reanalysis with the locked plan at `/home/smith6jt/.claude/plans/full-reanalysis-plan.md`
+
+User-confirmed parameters:
+- Margin gate: **0.2** (strict)
+- Panel coverage threshold: **30%**
+- Spatial coherence: **disabled for rare cell types** (only common
+  clustering types get the check)
+- scVI sex covariate: **YES**
+- Cross-sample prevalence ratio: **reported only, not a gate** (n=2)
+- Rare cell types (Epsilon, Gamma): identified via **rule-based
+  multi-criteria definitions** (not score_genes argmax) — see
+  `scripts/refine_rare_celltypes.py`
+
+Helper scripts written 2026-04-28 (ready to use):
+- `scripts/audit_panel_exclusions.py` — produces `data/processed/panel_audit.csv` (106 candidate exclusions)
+- `scripts/finalize_panel.py` — adds `var['panel_for_scoring']`, `var['panel_for_embedding']`, `obs['donor_sex']`
+- `scripts/refine_rare_celltypes.py` — post-stage-02 margin gate + panel coverage + rule-based Gamma/Epsilon + spatial coherence
+- `scripts/verify_rare_celltypes.py` — per-(sample × type) verification suite
+
+Notebook edits **still pending** (must be done before pipeline kickoff):
+- `notebooks/02_phenotyping.ipynb` cell 10: drop `'Epsilon': ['GHRL']`; mask
+  marker panels via `var['panel_for_scoring']`
+- `notebooks/02_phenotyping.ipynb` cell 17: add `donor_sex` to scVI
+  `categorical_covariate_keys`; restrict gene set to `panel_for_embedding`
+- `notebooks/01_preprocessing_v2.ipynb` cell 18: HVG / PCA on
+  `panel_for_embedding` only
+
+Wall-time after kickoff: ~3.5–4 h on the B200 GPU node for stages 01 + 02 + 03,
+followed by `refine_rare_celltypes.py` (~5 min), `insulitis_analysis.py`
+(~30 s), `figs_07_immune.py` (~5 min), and `verify_rare_celltypes.py` (~10 min).

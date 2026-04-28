@@ -416,8 +416,10 @@ ct = pd.crosstab(
 print("contingency: (sample, subtype) × distance_bin")
 print(ct.to_string())
 
-# Save full contingency to CSV
-ct.to_csv(DATA_ROOT / "immune_proximity_summary.csv")
+# Save full contingency to CSV — write to _legacy variant so we don't
+# overwrite the per-phenotype-aware headline owned by
+# scripts/insulitis_analysis.py (post-2026-04-28 rewrite).
+ct.to_csv(DATA_ROOT / "immune_proximity_summary_legacy_notebook07.csv")
 
 # Per-sample chi-square: is immune subtype independent of distance bin?
 print("\\nper-sample chi-square (subtype × distance_bin):")
@@ -493,51 +495,23 @@ if not infiltration.empty:
         .to_string()
     )
 
-    infiltration.to_csv(DATA_ROOT / "islet_infiltration_per100endo.csv", index=False)
-    print(f"\\nsaved per-islet infiltration to islet_infiltration_per100endo.csv")
+    # Write to _legacy variant so we don't overwrite the per-phenotype headline
+    # owned by scripts/insulitis_analysis.py (post-2026-04-28 rewrite).
+    infiltration.to_csv(DATA_ROOT / "islet_infiltration_per100endo_legacy_notebook07.csv", index=False)
+    print(f"\\nsaved per-islet infiltration to islet_infiltration_per100endo_legacy_notebook07.csv")
 """))
 
 cells.append(md("""## 11. Figures"""))
 
-cells.append(code("""# 11a. Immune UMAP colored by subtype + by sample
-combined_fig_dir = FIG_ROOT / "combined_07_immune"
-combined_fig_dir.mkdir(parents=True, exist_ok=True)
-
-fig, axes = plt.subplots(1, 3, figsize=(24, 7))
-sc.pl.umap(adata, color="immune_subtype", ax=axes[0], show=False, size=4,
-           legend_loc="on data", legend_fontsize=7,
-           title="Immune subtype (per-cell argmax)")
-sc.pl.umap(adata, color="immune_cluster_consensus", ax=axes[1], show=False,
-           size=4, legend_loc="on data", legend_fontsize=7,
-           title="Immune subtype (cluster consensus)")
-sc.pl.umap(adata, color="sample", ax=axes[2], show=False, size=4,
-           title="Sample")
-plt.tight_layout()
-plt.savefig(combined_fig_dir / "umap_immune.png", dpi=200, bbox_inches="tight")
-plt.show()
-
-# 11b. Per-subtype distance distribution (combined samples)
-fig, ax = plt.subplots(figsize=(14, 6))
-sub_names = sorted(adata.obs["immune_subtype"].unique())
-positions = np.arange(len(sub_names))
-for i, st in enumerate(sub_names):
-    d = adata.obs.loc[adata.obs["immune_subtype"] == st, "dist_to_islet_um"].dropna()
-    if len(d) == 0:
-        continue
-    parts = ax.violinplot([d.clip(upper=600).values], positions=[i],
-                          showmedians=True, widths=0.8)
-ax.set_xticks(positions)
-ax.set_xticklabels(sub_names, rotation=45, ha="right")
-ax.set_ylabel("distance to nearest islet (μm, clipped at 600)")
-ax.set_title("Per-subtype distance to islet")
-ax.axhline(50, color="grey", linestyle="--", linewidth=0.8, alpha=0.6,
-           label="50 μm (intra/peri)")
-ax.axhline(200, color="grey", linestyle=":", linewidth=0.8, alpha=0.6,
-           label="200 μm (proximal)")
-ax.legend()
-plt.tight_layout()
-plt.savefig(combined_fig_dir / "subtype_distance_violin.png", dpi=200, bbox_inches="tight")
-plt.show()
+cells.append(code("""# 11a-11b. Combined-sample UMAP + all-subtype distance violin are now
+# produced by scripts/figs_07_immune.py::fig13_combined_immune_umap and
+# ::fig14_all_subtype_distance_violin, reading from the current
+# _immune_phenotyped.h5ad files. Notebook 07's prior outputs to
+# figures/combined_07_immune/ predated the lognorm sample-comparable
+# threshold fix and were moved to figures/legacy/combined_07_immune_pre_lognorm_fix/.
+print("[deprecated] combined-sample immune UMAP + per-subtype distance violin "
+      "are now produced by scripts/figs_07_immune.py (fig13/fig14). "
+      "Run that script instead of the notebook for these plots.")
 
 # 11c. Subtype × distance_bin heatmap (per-sample)
 for s in SAMPLES:

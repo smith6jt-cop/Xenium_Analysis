@@ -1,281 +1,94 @@
-# Data Directory Structure
+# Data layout
 
-This document describes the expected data structure for the Xenium analysis pipeline.
+Project-specific reference. Generic Xenium data-loading docs live in the [10x
+Xenium documentation](https://www.10xgenomics.com/support/in-situ-gene-expression).
 
-## Directory Overview
+## What this project actually has
+
+Two human pancreas FFPE samples on the **hAtlas v1.1 + 100-gene custom T1D
+add-on** panel (Xenium 5K base + custom probes). Both samples are FFPE,
+probe-based, chemistry v2.
+
+| Sample | Cells (post-QC) | Donor sex | Notes |
+|---|---:|---|---|
+| 0041323 | ~1,145,295 | female | (KDM5D ~0%) |
+| 0041326 | ~1,168,473 | male | (KDM5D ~10%, more advanced T1D progression by IAPP loss) |
+
+`donor_sex` is auto-derived from KDM5D + DDX3Y detection — see
+`scripts/finalize_panel.py`.
+
+## Directory structure
 
 ```
 data/
-├── raw/              # Raw Xenium and Phenocycler files
-├── processed/        # Intermediate and final processed files
-└── phenocycler/      # Phenocycler-specific data
+├── raw/
+│   ├── 0041323.zarr/        # spatialdata zarr ingested via notebook 00
+│   └── 0041326.zarr/
+├── processed/
+│   ├── 0041323/
+│   │   ├── 0041323_phenotyped.h5ad         # PRIMARY output of stage 02
+│   │   ├── 0041323_spatial_analysis.h5ad   # PRIMARY output of stage 03
+│   │   ├── 0041323_immune_phenotyped.h5ad  # gated immune subset (notebook 07)
+│   │   └── *.csv                           # per-stage tables
+│   ├── 0041326/                            # same layout
+│   ├── panel_audit.csv                     # candidate panel exclusions
+│   ├── islet_*.csv                         # insulitis headline tables
+│   ├── immune_proximity_summary.csv
+│   └── legacy/                             # archived pre-rebuild artifacts
+└── xenium_explorer/
+    ├── {sample}/analysis.zarr.zip          # drop next to experiment.xenium
+    ├── {sample}_cell_groups.csv            # Cell → Add cell categorization
+    └── {sample}_color_palette.json
 ```
 
-## Raw Data (`data/raw/`)
-
-### Xenium Data
-
-Place your Xenium h5 files here. The pipeline supports multiple formats:
-
-**Option 1: AnnData h5ad format (Recommended)**
-```
-data/raw/
-└── xenium_sample_01.h5ad
-```
-
-**Option 2: 10X h5 format**
-```
-data/raw/
-└── xenium_sample_01.h5
-```
-
-**Option 3: Xenium output directory**
-```
-data/raw/
-└── xenium_sample_01/
-    ├── cells.csv.gz
-    ├── cell_feature_matrix.h5
-    ├── cell_feature_matrix/
-    └── ...
-```
-
-### File Naming Convention
-
-Use descriptive, consistent naming:
-```
-<project>_<tissue>_<condition>_<replicate>.h5ad
-
-Examples:
-study1_liver_control_rep1.h5ad
-study1_liver_treatment_rep1.h5ad
-study2_kidney_healthy_rep1.h5ad
-```
-
-## Processed Data (`data/processed/`)
-
-The pipeline automatically generates processed files at each step:
-
-```
-data/processed/
-├── sample_01_preprocessed.h5ad          # After 01_preprocessing.ipynb
-├── sample_01_annotated.h5ad             # After 02_phenotyping.ipynb
-├── sample_01_spatial_analysis.h5ad      # After 03_spatial_analysis.ipynb
-├── sample_01_celltype_assignments.csv   # Cell type annotations
-├── sample_01_marker_genes.csv           # Marker genes per cluster
-├── sample_01_de_genes_by_group.csv      # Differential expression results
-└── integrated_tissues.h5ad              # After multi-tissue integration
-```
-
-## Xenium Explorer Export (`data/xenium_explorer/`)
-
-After phenotyping, clusters and phenotypes can be exported back to
-Xenium Explorer via `utils.xenium_explorer_export` (see the main README's
-[*Exporting Clusters / Phenotypes to Xenium Explorer*](README.md#exporting-clusters--phenotypes-to-xenium-explorer)
-section). The default output directory layout is:
-
-```
-data/xenium_explorer/
-├── sample_01_cell_groups.csv         # Load: Cell -> Add cell categorization
-├── sample_01_color_palette.json      # {grouping: {category: '#RRGGBB'}}
-└── sample_01/
-    └── analysis.zarr.zip             # Copy next to experiment.xenium
-```
-
-- **`*_cell_groups.csv`** — first column `cell_id`, one column per
-  exported grouping (`leiden_0.5`, `celltype`, `phenotype`, ...). Matched
-  by `cell_id` so it's safe after any filtering or reordering.
-- **`<sample>/analysis.zarr.zip`** — native Xenium Explorer analysis
-  bundle in zarr v2 layout. Position-indexed — only use if the AnnData
-  row order still matches the original `cells.parquet`.
-- **`*_color_palette.json`** — category-to-hex-color map. Reuse it when
-  plotting in Python so figures match what Xenium Explorer shows.
-
-Generate with either:
-
-```python
-from utils import export_for_xenium_explorer
-export_for_xenium_explorer(adata, group_keys=[...], output_dir=..., sample_name=...)
-```
-
-or from the CLI:
-
-```bash
-python scripts/export_xenium_explorer_groups.py -i ... -o ... -s ... -g ...
-```
-
-## Phenocycler Data (`data/phenocycler/`)
-
-### Expected Format
-
-Phenocycler/CODEX data can be in various formats:
-
-**Option 1: AnnData format (Recommended)**
-```
-data/phenocycler/
-└── sample_01_phenocycler.h5ad
-```
-
-**Option 2: CSV/TSV format**
-```
-data/phenocycler/
-├── sample_01_expression.csv       # Protein expression matrix
-├── sample_01_metadata.csv         # Cell metadata
-└── sample_01_coordinates.csv      # Spatial coordinates
-```
-
-### CSV Format Specifications
-
-If providing CSV files, use the following structure:
-
-**expression.csv**
-```csv
-cell_id,CD3,CD4,CD8,CD19,CD68,...
-cell_0001,15.2,8.3,1.2,0.5,2.1,...
-cell_0002,2.1,1.5,18.7,0.3,1.8,...
-...
-```
-
-**metadata.csv**
-```csv
-cell_id,cluster,region,sample_id
-cell_0001,T_cells,tumor,sample_01
-cell_0002,B_cells,stroma,sample_01
-...
-```
-
-**coordinates.csv**
-```csv
-cell_id,x,y
-cell_0001,1523.4,2847.6
-cell_0002,1528.9,2851.2
-...
-```
-
-## Data Requirements
-
-### Minimum Requirements
-
-For Xenium data:
-- Gene expression matrix (cells × genes)
-- Spatial coordinates (x, y) for each cell
-- Cell IDs
-
-For Phenocycler data:
-- Protein expression matrix (cells × proteins)
-- Spatial coordinates (x, y) for each cell
-- Cell IDs
-
-### Recommended Additional Data
-
-- Cell type annotations (if available)
-- Sample metadata (condition, replicate, etc.)
-- QC metrics
-- Segmentation boundaries (for visualization)
-
-## Example Data
-
-For testing the pipeline, you can use publicly available datasets:
-
-### Xenium Public Datasets
-
-1. **10x Genomics Demo Data**
-   - https://www.10xgenomics.com/products/xenium-in-situ/preview-dataset-human-breast
-   - Download the h5 file to `data/raw/`
-
-2. **Chan Zuckerberg CELLxGENE**
-   - https://cellxgene.cziscience.com/
-   - Search for Xenium datasets
-
-### Converting Data Formats
-
-If you have data in other formats, use the conversion utilities:
-
-```python
-import scanpy as sc
-import pandas as pd
-
-# From CSV
-expr = pd.read_csv('expression.csv', index_col=0)
-metadata = pd.read_csv('metadata.csv', index_col=0)
-coords = pd.read_csv('coordinates.csv', index_col=0)
-
-# Create AnnData
-adata = sc.AnnData(X=expr.values)
-adata.obs = metadata
-adata.var_names = expr.columns
-adata.obs_names = expr.index
-adata.obsm['spatial'] = coords[['x', 'y']].values
-
-# Save
-adata.write_h5ad('data/raw/sample_01.h5ad')
-```
-
-## Storage Considerations
-
-### Disk Space Requirements
-
-Typical file sizes:
-- Raw Xenium data: 1-10 GB per sample
-- Preprocessed data: 2-20 GB per sample
-- Figures: 10-100 MB per sample
-- Total per sample: ~5-30 GB
-
-### Backup Strategy
-
-Important data to backup:
-1. ✅ Raw data files (always keep originals)
-2. ✅ Final processed files (annotated, integrated)
-3. ✅ Analysis reports and figures
-4. ⚠️ Intermediate files (can be regenerated)
-
-## Data Privacy and Compliance
-
-### For Human Data
-
-- Ensure proper IRB approval
-- De-identify patient data
-- Follow HIPAA/GDPR guidelines
-- Secure data storage
-
-### For Collaborative Projects
-
-- Use consistent naming conventions
-- Document metadata thoroughly
-- Version control analysis parameters
-- Share preprocessing scripts
-
-## Troubleshooting
-
-### Common Issues
-
-**1. File not found errors**
-```bash
-# Check file exists
-ls -lh data/raw/
-
-# Check file permissions
-chmod 644 data/raw/your_file.h5ad
-```
-
-**2. Format errors**
-```python
-# Verify AnnData structure
-import scanpy as sc
-adata = sc.read_h5ad('data/raw/sample.h5ad')
-print(adata)  # Should show cells × genes
-print(adata.obs.columns)  # Check metadata
-print('spatial' in adata.obsm)  # Check coordinates
-```
-
-**3. Large file handling**
-```python
-# For very large files, use backed mode
-adata = sc.read_h5ad('data/raw/large_file.h5ad', backed='r')
-```
-
-## Contact
-
-For data format questions or issues:
-- Open an issue on GitHub
-- Check the README.md for general documentation
-- See example notebooks for data loading patterns
+## h5ad layer / obs / obsm contracts
+
+`*_phenotyped.h5ad` (stage 02 output) MUST contain:
+
+- `layers['counts']` — raw integer counts
+- `layers['lognorm']` — `log1p(normalize_total)` (sample-comparable scale)
+- `obsm['spatial']` — (n_cells, 2) xy in microns
+- `obsm['X_scvi']` — scVI latent (30 dims)
+- `obsm['X_umap']` — scVI-derived UMAP
+- `obs['celltype']`, `obs['celltype_lineage']`, `obs['leiden_scvi']`
+- `obs['donor_sex']` — `'male'` / `'female'` (added by `scripts/finalize_panel.py`)
+- `var['panel_for_scoring']`, `var['panel_for_embedding']` — panel-audit boolean masks
+
+`*_spatial_analysis.h5ad` (stage 03 output) adds:
+- `obs['spatial_niche']` — KMeans cluster ID
+- `uns['nhood_enrichment']`, `uns['co_occurrence']`, `uns['ligrec']` — squidpy outputs
+
+## Headline CSV outputs
+
+| File | Owner script | Schema |
+|---|---|---|
+| `panel_audit.csv` | `scripts/audit_panel_exclusions.py` | gene-by-gene flagging w/ exclude category |
+| `islet_infiltration_per100endo.csv` | `scripts/insulitis_analysis.py` | per-islet rows; per-phenotype zone counts, rates, grades; composition |
+| `islet_insulitis_grades.csv` | `scripts/insulitis_analysis.py` | long format: per-(sample × subtype) grade prevalence |
+| `islet_insulitis_thresholds.csv` | `scripts/insulitis_analysis.py` | per-(sample × size_class × subtype) rotation-null thresholds |
+| `islet_insulitis_regression.csv` | `scripts/insulitis_analysis.py` | per-(sample × subtype) odds ratios, no p-values (n=2) |
+| `immune_proximity_summary.csv` | `scripts/insulitis_analysis.py` | density enrichment per immune subtype × sample |
+| `rare_celltype_verification.csv` | `scripts/verify_rare_celltypes.py` | per-(sample × type) dotplot/coexpression checks |
+
+`scripts/insulitis_analysis.py` is the **single writer** of the islet/immune
+headline CSVs. Do not regenerate them from `scripts/rerun_immune_pipeline.py` or
+`scripts/build_notebook_07.py` — those have early-exit redirects pointing here.
+
+## Xenium Explorer round-trip
+
+`utils/xenium_explorer_export.py::export_for_xenium_explorer(adata,
+group_keys=[...], output_dir=..., sample_name=...)` writes both formats and a
+color palette JSON. The CLI wrapper is
+`scripts/export_xenium_explorer_groups.py`.
+
+## Storage footprint per sample
+
+- raw zarr: ~5–10 GB
+- `_phenotyped.h5ad`: ~60 GB
+- `_spatial_analysis.h5ad`: ~10 GB
+- `_immune_phenotyped.h5ad`: ~1 GB
+
+## Data privacy
+
+Human pancreas tissue from de-identified donors (consent on file). Standard
+HIPAA/IRB practices apply; no PHI in any committed file.

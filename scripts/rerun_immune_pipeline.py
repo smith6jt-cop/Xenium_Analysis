@@ -285,16 +285,19 @@ def main():
                                                   + grade_df["peri_insulitis"]
                                                   ) / grade_df["total_islets"]
 
-    # ---- Write headline CSVs (overwrite) ----
-    print(f"\n{'='*72}\nSTEP 6: write CSVs\n{'='*72}", flush=True)
-    enr_df.to_csv(ROOT / "data/processed/immune_proximity_summary.csv",
-                    index=False)
-    per_df.to_csv(ROOT / "data/processed/islet_infiltration_per100endo.csv",
-                    index=False)
-    grade_df.to_csv(ROOT / "data/processed/islet_insulitis_grades.csv",
-                      index=False)
-    print(f"  wrote 3 headline CSVs", flush=True)
-    print(f"\nGrade summary:\n{grade_df.to_string(index=False)}", flush=True)
+    # ---- Headline CSVs are now owned by scripts/insulitis_analysis.py ----
+    # The per-phenotype dynamic-grading rewrite (2026-04-28) moved the three
+    # headline tables (immune_proximity_summary.csv,
+    # islet_infiltration_per100endo.csv, islet_insulitis_grades.csv) to a
+    # single writer. Running this block would silently revert the schema.
+    print(f"\n{'='*72}\nSTEP 6: skipped — headline CSV writes redirected\n{'='*72}",
+            flush=True)
+    print("  Headline tables (immune_proximity_summary.csv, "
+            "islet_infiltration_per100endo.csv, islet_insulitis_grades.csv)\n"
+            "  are now owned by scripts/insulitis_analysis.py "
+            "(per-phenotype dynamic grading).", flush=True)
+    print("  Run: python scripts/insulitis_analysis.py", flush=True)
+    raise SystemExit(0)
 
     # ---- Save final immune h5ad ----
     p_out = ROOT / "data/processed/immune_combined_phenotyped.h5ad"

@@ -148,18 +148,50 @@ present in `notebooks/` but not part of the per-sample default flow.
 11. **Lineage phenotyping (post-density-filter doublet refinement).**
     Implemented in stage 02 cell 22 (and as a post-hoc script
     `scripts/lineage_phenotype.py`). For each cell, count how many
-    distinct markers from each canary lineage panel are detected at raw
-    count ≥ 3 ("depth"). When ≥ 2 mutually-exclusive groups are
-    co-detected, the cell is resolved to the dominant lineage if
-    `top_depth − second_depth ≥ 2 AND top_depth ≥ 2`; tagged
-    `lineage_phenotyped` and `celltype_lineage` is set to the dominant
-    lineage. ≥ 3 mutually-exclusive groups co-detected → tagged
+    distinct markers from each canary lineage panel are detected at
+    `lognorm ≥ log1p(3)` ("depth", sample-comparable). When ≥ 2
+    mutually-exclusive groups are co-detected, the cell is resolved to
+    the dominant lineage if `top_depth − second_depth ≥ 2 AND top_depth ≥ 2`;
+    tagged `lineage_phenotyped` and `celltype_lineage` is set to the
+    dominant lineage. ≥ 3 mutually-exclusive groups co-detected → tagged
     `doublet_suspected` (segmentation merge), kept as-is.
-    `celltype` is NEVER overwritten — `celltype_lineage` is the refined
-    column for downstream consumers. Acinar canary panel was expanded
-    from `[AMY1A]` to `[AMY1A, CUZD1]` so depth comparisons are fair
-    across all lineages. The exact panels live in
-    `scripts/verify_upper_tail_doublets.py::CANARY_PANELS`.
+    `celltype` is NEVER overwritten by lineage refinement —
+    `celltype_lineage` is the refined column for downstream consumers.
+    Acinar canary panel was expanded from `[AMY1A]` to `[AMY1A, CUZD1]`
+    so depth comparisons are fair across all lineages. The exact panels
+    live in `scripts/verify_upper_tail_doublets.py::CANARY_PANELS`.
+
+12. **Cell-type scoring panels MUST have ≥ 3 genes.** Single-gene
+    "panels" (the historical `'Epsilon': ['GHRL']` entry in stage 02
+    cell 10 was the only offender) are forbidden. Reason: the
+    score_genes argmax under detection asymmetry biases toward the
+    least-comprehensive panel — 0041326's lower per-cell detection let
+    the 1-gene Epsilon score beat multi-gene panels, mislabeling 150K
+    cells (~13% of the section) as Epsilon. Rare cell types with
+    insufficient panel coverage are identified via **rule-based
+    multi-criteria definitions** in `scripts/refine_rare_celltypes.py`,
+    NOT via score_genes argmax. Currently rule-based: Gamma cells
+    (AQP3 + ETV1 + pan-endocrine, NOT Beta/Delta) and Epsilon cells
+    (GHRL + pan-endocrine, NOT Beta/Alpha/Delta/Gamma).
+
+13. **Donor-sex confound.** Samples differ by donor sex: 0041323 is
+    female, 0041326 is male. Y-chromosome genes (KDM5D, DDX3Y et al.)
+    are at ~10% / ~7.7% in 0041326 vs ~0% in 0041323. The full
+    sex-chromosome gene set is excluded from cell-type scoring AND
+    from PCA/scVI input via the `panel_for_embedding` var-mask set by
+    `scripts/finalize_panel.py`. scVI training adds `donor_sex` to
+    `categorical_covariate_keys`. **Cross-sample comparison must be
+    sex-aware**; do not pool male+female cells without controlling
+    for the chromosome.
+
+14. **Panel audit lives at `data/processed/panel_audit.csv`.** 106
+    candidate exclusions across 12 categories (sperm/germline,
+    photoreceptor, hepatocyte, cardiac/skeletal muscle, sex chromosome,
+    bone, etc.) — genes biologically implausible in pancreas/LN/vessel
+    tissue. Two boolean var-masks: `panel_for_scoring` (drops 100
+    non-sex tissue-restricted genes) and `panel_for_embedding`
+    (additionally drops 6 sex-chromosome genes). Set by
+    `scripts/finalize_panel.py`.
 
 ## Repo layout (current)
 
@@ -284,6 +316,4 @@ NOT driving the embedding."
 - HANDOFF.md → "what just happened, how to resume"
 - This file (CLAUDE.md) → "how the repo is structured"
 - README.md → user-facing docs
-- IMPLEMENTATION_SUMMARY.md → high-level inventory (CI, Xenium Explorer
-  export, etc.)
-- DATA_README.md → expected data formats and Xenium Explorer outputs
+- DATA_README.md → expected data formats, h5ad contracts, headline CSVs

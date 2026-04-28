@@ -40,6 +40,14 @@ MIN_SAMPLES = 10
 ISLET_ZONE_UM = 50.0
 PROXIMAL_UM = 200.0
 
+# Allowlist of true immune phenotypes — all stacked-subtype figures derive
+# their column lists from this. Kept in sync with insulitis_analysis.py.
+IMMUNE_SUBTYPES = ["B_pan", "B_plasma", "DC",
+                    "Macro_M1", "Macro_M2", "Macro_resident",
+                    "Monocyte", "NK",
+                    "T_cytotoxic", "T_exhausted", "T_helper", "T_reg"]
+SIZE_CLASSES = ["tiny", "small", "med", "large", "xl"]
+
 # ===== Marker panels =====
 TCELL_MARKERS = {
     "Pan-T":       ["CD3E", "CD3G", "CD2", "CD5", "PTPRC"],
@@ -193,45 +201,121 @@ def setup_fig(nrows, ncols, w, h):
     return fig, axes
 
 
-# ===== 01: Insulitis grade summary =====
+# ===== 01: Per-phenotype insulitis prevalence heatmap =====
 def fig01_insulitis_grades():
-    print("\n=== fig 01: insulitis grade summary ===")
+    print("\n=== fig 01: per-phenotype insulitis prevalence heatmap ===")
     g = pd.read_csv(ROOT / "data/processed/islet_insulitis_grades.csv",
                      dtype={"sample": str})
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5),
-                                       constrained_layout=True)
-    cols = ["no_insulitis", "peri_insulitis", "insulitis"]
-    colors = ["#cccccc", "#fdae61", "#d7191c"]
-    bottom = np.zeros(len(g))
-    x = np.arange(len(g))
-    for c, col in zip(cols, colors):
-        ax1.bar(x, g[c].values, bottom=bottom, color=col, label=c,
-                  edgecolor="black", linewidth=0.5)
-        bottom += g[c].values
-    ax1.set_xticks(x)
-    ax1.set_xticklabels(g["sample"])
-    ax1.set_ylabel("Number of islets")
-    ax1.set_title("Insulitis grade per sample (counts)")
-    ax1.legend(loc="upper left", framealpha=0.95)
-    # Right: percentages
-    pct = g[cols].div(g[cols].sum(axis=1), axis=0) * 100
-    bottom = np.zeros(len(g))
-    for c, col in zip(cols, colors):
-        ax2.bar(x, pct[c].values, bottom=bottom, color=col, label=c,
-                 edgecolor="black", linewidth=0.5)
-        bottom += pct[c].values
-    ax2.set_xticks(x)
-    ax2.set_xticklabels(g["sample"])
-    ax2.set_ylabel("% of islets")
-    ax2.set_title("Insulitis grade per sample (percent)")
-    for i, row in g.iterrows():
-        ax2.text(i, 105, f"n={int(row['total_islets'])}",
-                  ha="center", fontsize=10)
-    ax2.set_ylim(0, 115)
-    plt.suptitle("Clinical insulitis grading (Campbell-Thompson 2013, "
-                  "≥6 immune cells within 50 μm = insulitis)",
-                  fontsize=11)
+    pivot_pct = g.pivot(index="subtype", columns="sample",
+                          values="pct_insulitis")
+    pivot_n = g.pivot(index="subtype", columns="sample", values="insulitis")
+    pivot_tot = g.pivot(index="subtype", columns="sample", values="total_islets")
+    # Order: per-phenotype subtypes by max prevalence desc, then absolute_total
+    sub_rows = [r for r in pivot_pct.index if r != "absolute_total"]
+    sub_rows = sorted(sub_rows,
+                       key=lambda r: pivot_pct.loc[r].max(skipna=True),
+                       reverse=True)
+    row_order = sub_rows + (["absolute_total"]
+                              if "absolute_total" in pivot_pct.index else [])
+    pivot_pct = pivot_pct.loc[row_order]
+    pivot_n = pivot_n.loc[row_order]
+    pivot_tot = pivot_tot.loc[row_order]
+
+    fig, ax = plt.subplots(figsize=(6, 6.5), constrained_layout=True)
+    arr = pivot_pct.values.astype(float)
+    im = ax.imshow(arr, aspect="auto", cmap="Reds", vmin=0, vmax=100)
+    ax.set_xticks(range(len(pivot_pct.columns)))
+    ax.set_xticklabels(pivot_pct.columns)
+    ax.set_yticks(range(len(row_order)))
+    ax.set_yticklabels(row_order)
+    for i, sub in enumerate(row_order):
+        for j, samp in enumerate(pivot_pct.columns):
+            v = pivot_pct.iloc[i, j]
+            n = int(pivot_n.iloc[i, j]) if np.isfinite(pivot_n.iloc[i, j]) else 0
+            tot = int(pivot_tot.iloc[i, j]) if np.isfinite(pivot_tot.iloc[i, j]) else 0
+            txt_color = "white" if v > 50 else "black"
+            ax.text(j, i, f"{v:.1f}%\n({n}/{tot})",
+                     ha="center", va="center", fontsize=8, color=txt_color)
+    if "absolute_total" in row_order:
+        sep_y = len(sub_rows) - 0.5
+        ax.axhline(sep_y, color="black", lw=1.4)
+    plt.colorbar(im, ax=ax, label="% islets with `insulitis` grade")
+    ax.set_title("Per-phenotype insulitis prevalence\n"
+                  "(rotation null, 1000 rotations, 99th-percentile threshold)\n"
+                  "Bottom row: Campbell-Thompson 3/6 absolute on total_immune")
     fig.savefig(OUT / "01_insulitis_grade_summary.png",
+                  dpi=200, bbox_inches="tight")
+    plt.close()
+
+
+# ===== 01b: Per-phenotype distribution with thresholds =====
+def fig01b_per_phenotype_distribution():
+    print("=== fig 01b: per-phenotype distribution with thresholds ===")
+    df = pd.read_csv(ROOT / "data/processed/islet_infiltration_per100endo.csv",
+                      dtype={"sample": str})
+    thr = pd.read_csv(ROOT / "data/processed/islet_insulitis_thresholds.csv",
+                       dtype={"sample": str})
+    g = pd.read_csv(ROOT / "data/processed/islet_insulitis_grades.csv",
+                     dtype={"sample": str})
+    sub_rows = g[g["subtype"] != "absolute_total"].copy()
+    by_sub = (sub_rows.groupby("subtype", observed=True)["pct_peri_or_insulitis"]
+                .max().sort_values(ascending=False))
+    top_subs = by_sub.head(6).index.tolist()
+    if not top_subs:
+        print("    no signal; falling back to first 6 IMMUNE_SUBTYPES")
+        top_subs = IMMUNE_SUBTYPES[:6]
+
+    n_rows = len(top_subs)
+    fig, axes = plt.subplots(n_rows, 2, figsize=(11, 2.4*n_rows),
+                                constrained_layout=True, sharex=False)
+    if n_rows == 1:
+        axes = axes.reshape(1, 2)
+    sc_color = {"tiny": "#9ecae1", "small": "#6baed6", "med": "#4292c6",
+                  "large": "#2171b5", "xl": "#08306b"}
+    for i, S in enumerate(top_subs):
+        col = f"{S}_per100endo"
+        if col not in df.columns:
+            continue
+        for j, samp in enumerate(SAMPLES):
+            ax = axes[i, j]
+            sub = df[df["sample"] == samp]
+            vals = sub[col].values.astype(float)
+            vals = vals[np.isfinite(vals)]
+            if vals.size == 0:
+                ax.text(0.5, 0.5, "no data",
+                         transform=ax.transAxes, ha="center")
+                ax.axis("off")
+                continue
+            vmax = max(np.percentile(vals, 99), 1.0)
+            bins = np.linspace(0, vmax * 1.05, 50)
+            for sc_name, sc_col in sc_color.items():
+                m = sub["size_class"] == sc_name
+                if m.sum() == 0:
+                    continue
+                ax.hist(sub.loc[m, col].values, bins=bins,
+                          color=sc_col, alpha=0.55,
+                          label=f"{sc_name} (n={int(m.sum())})",
+                          edgecolor="none")
+            t_sub = thr[(thr["sample"] == samp) & (thr["subtype"] == S)]
+            for _, row in t_sub.iterrows():
+                sc_col = sc_color.get(row["size_class"], "grey")
+                if np.isfinite(row["thresh_peri"]):
+                    ax.axvline(row["thresh_peri"], ls="--",
+                                color=sc_col, lw=1.0, alpha=0.7)
+                if np.isfinite(row["thresh_insulitis"]):
+                    ax.axvline(row["thresh_insulitis"], ls="-",
+                                color=sc_col, lw=1.2, alpha=0.85)
+            ax.set_xlabel(f"{S}_per100endo")
+            ax.set_ylabel("# islets")
+            ax.set_title(f"{S} — {samp}", fontsize=10)
+            if i == 0 and j == 1:
+                ax.legend(loc="upper right", fontsize=7, framealpha=0.9)
+            ax.set_yscale("symlog", linthresh=1)
+    plt.suptitle("Per-phenotype per-100-endocrine distributions\n"
+                  "Dashed = peri-insulitis thresh (95th); solid = insulitis (99th); "
+                  "color = size_class",
+                  fontsize=11)
+    fig.savefig(OUT / "01b_per_phenotype_distribution.png",
                   dpi=200, bbox_inches="tight")
     plt.close()
 
@@ -241,14 +325,26 @@ def fig02_density_enrichment():
     print("=== fig 02: density enrichment heatmap ===")
     e = pd.read_csv(ROOT / "data/processed/immune_proximity_summary.csv",
                      dtype={"sample": str})
+    # Drop non-immune contaminant subtypes (phenotyping leakage; <10 cells).
+    NON_IMMUNE = {"Acinar", "Endothelial", "Schwann"}
+    e = e[~e["immune_subtype"].isin(NON_IMMUNE)].copy()
+    # Drop low-coverage rows where enrichment is dominated by noise.
+    e = e[(e["n_in_islet_zone"] + e["n_in_distal"]) >= 30].copy()
     pivot = e.pivot(index="immune_subtype", columns="sample",
                        values="density_enrichment")
-    # Order subtypes by mean enrichment
-    pivot = pivot.loc[pivot.mean(axis=1).sort_values(ascending=False).index]
+    # Order subtypes by mean enrichment (NaN-safe).
+    pivot = pivot.loc[pivot.mean(axis=1, skipna=True)
+                            .sort_values(ascending=False).index]
     fig, ax = plt.subplots(figsize=(7, 7), constrained_layout=True)
-    log_pivot = np.log2(pivot.clip(lower=0.01))
-    vmax = max(abs(log_pivot.min().min()), abs(log_pivot.max().max()))
-    im = ax.imshow(log_pivot.values, aspect="auto", cmap="RdBu_r",
+    # log2 of pivot; positive enrichment > 0, depleted < 0. NaNs propagate.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        log_arr = np.log2(pivot.values.astype(float))
+    masked = np.ma.masked_invalid(log_arr)
+    finite_max = float(np.nanmax(np.abs(log_arr))) if np.isfinite(log_arr).any() else 1.0
+    vmax = min(2.0, finite_max)
+    cmap = plt.get_cmap("RdBu_r").copy()
+    cmap.set_bad("#dddddd")
+    im = ax.imshow(masked, aspect="auto", cmap=cmap,
                     vmin=-vmax, vmax=vmax)
     ax.set_xticks(range(len(pivot.columns)))
     ax.set_xticklabels(pivot.columns)
@@ -257,13 +353,21 @@ def fig02_density_enrichment():
     for i in range(pivot.shape[0]):
         for j in range(pivot.shape[1]):
             v = pivot.values[i, j]
+            log_v = log_arr[i, j]
+            if not np.isfinite(log_v):
+                ax.text(j, i, "n/a", ha="center", va="center",
+                         color="#555555", fontsize=9)
+                continue
+            txt_color = "white" if abs(log_v) > 0.55 * vmax else "black"
             ax.text(j, i, f"{v:.2f}", ha="center", va="center",
-                     color="black" if abs(np.log2(max(v, .01))) < vmax*0.6 else "white",
-                     fontsize=9)
-    cb = plt.colorbar(im, ax=ax, label="log₂(density enrichment)\n"
-                                          "(islet-zone vs distal)")
+                     color=txt_color, fontsize=9)
+    plt.colorbar(im, ax=ax,
+                  label="log₂(density enrichment), capped ±2\n"
+                        "(islet-zone vs distal)")
     ax.set_title("Density enrichment per immune subtype × sample\n"
-                  "values shown are linear-scale enrichment ratios")
+                  "values shown are linear-scale enrichment ratios\n"
+                  "(non-immune subtypes and rows with <30 cells in "
+                  "islet+distal zones omitted)")
     fig.savefig(OUT / "02_density_enrichment_heatmap.png",
                   dpi=200, bbox_inches="tight")
     plt.close()
@@ -304,33 +408,82 @@ def fig03_distance_cdf(adata):
     plt.close()
 
 
-# ===== 04: islet size vs immune burden =====
+# ===== 04: per-phenotype size vs rate =====
 def fig04_islet_size_immune():
-    print("=== fig 04: islet size vs immune burden ===")
+    print("=== fig 04: per-phenotype islet size vs per100endo ===")
     df = pd.read_csv(ROOT / "data/processed/islet_infiltration_per100endo.csv",
                       dtype={"sample": str})
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6),
-                                constrained_layout=True)
+    g = pd.read_csv(ROOT / "data/processed/islet_insulitis_grades.csv",
+                     dtype={"sample": str})
+    sub_rows = g[g["subtype"] != "absolute_total"]
+    by_sub = (sub_rows.groupby("subtype", observed=True)["pct_peri_or_insulitis"]
+                .max().sort_values(ascending=False))
+    top_subs = by_sub.head(6).index.tolist()
+    if not top_subs:
+        top_subs = IMMUNE_SUBTYPES[:6]
+
     grade_color = {"no_insulitis": "#cccccc",
-                     "peri_insulitis": "#fdae61",
-                     "insulitis": "#d7191c"}
-    for ax, s in zip(axes, SAMPLES):
+                    "peri_insulitis": "#fdae61",
+                    "insulitis": "#d7191c"}
+
+    n_show = len(top_subs)
+    n_cols = 3
+    n_rows = (n_show + n_cols - 1) // n_cols
+
+    # Top-of-figure overview row: total_immune vs n_endocrine, both samples
+    fig = plt.figure(figsize=(13, 4.0 * (n_rows + 1)),
+                       constrained_layout=True)
+    gs = fig.add_gridspec(n_rows + 1, n_cols)
+
+    overview = fig.add_subplot(gs[0, :])
+    for s in SAMPLES:
         sub = df[df["sample"] == s]
         for grade, color in grade_color.items():
-            mm = sub["insulitis_grade"] == grade
-            ax.scatter(sub.loc[mm, "n_endocrine"],
-                         sub.loc[mm, "total_immune"],
-                         s=20, c=color, alpha=0.7,
-                         label=f"{grade} (n={int(mm.sum())})",
-                         edgecolors="black", linewidths=0.3)
+            mm = sub["insulitis_grade_absolute"] == grade
+            marker = "o" if s == SAMPLES[0] else "^"
+            overview.scatter(sub.loc[mm, "n_endocrine"],
+                                sub.loc[mm, "total_immune"],
+                                s=22, c=color, alpha=0.7, marker=marker,
+                                label=f"{s} — {grade} (n={int(mm.sum())})",
+                                edgecolors="black", linewidths=0.3)
+    overview.set_xscale("log")
+    overview.set_yscale("symlog", linthresh=1)
+    overview.set_xlabel("Endocrine cells in islet (n)")
+    overview.set_ylabel("Total immune in 50 μm")
+    overview.set_title("Overview: total immune burden (Campbell-Thompson absolute grade)")
+    overview.legend(loc="upper left", framealpha=0.9, fontsize=8, ncol=2)
+    overview.grid(True, alpha=0.3)
+
+    # Per-phenotype small multiples
+    for i, S in enumerate(top_subs):
+        r, c = divmod(i, n_cols)
+        ax = fig.add_subplot(gs[r + 1, c])
+        col_rate = f"{S}_per100endo"
+        col_grade = f"{S}_grade"
+        for s in SAMPLES:
+            sub = df[df["sample"] == s]
+            marker = "o" if s == SAMPLES[0] else "^"
+            for grade, color in grade_color.items():
+                mm = sub[col_grade] == grade
+                if mm.sum() == 0:
+                    continue
+                lbl = (f"{s} {grade} (n={int(mm.sum())})"
+                        if i == 0 else None)
+                ax.scatter(sub.loc[mm, "n_endocrine"],
+                             sub.loc[mm, col_rate],
+                             s=18, c=color, marker=marker, alpha=0.7,
+                             edgecolors="black", linewidths=0.25,
+                             label=lbl)
         ax.set_xscale("log")
         ax.set_yscale("symlog", linthresh=1)
-        ax.set_xlabel("Endocrine cells in islet (n)")
-        ax.set_ylabel("Immune cells within 50 μm")
-        ax.set_title(f"{s} — n_islets={len(sub)}")
-        ax.legend(loc="upper left", framealpha=0.95, fontsize=9)
+        ax.set_xlabel("n_endocrine")
+        ax.set_ylabel(f"{S} per 100 endo")
+        ax.set_title(f"{S}", fontsize=11)
         ax.grid(True, alpha=0.3)
-    plt.suptitle("Per-islet immune burden vs islet size",
+        if i == 0:
+            ax.legend(loc="upper left", framealpha=0.9, fontsize=7, ncol=1)
+    plt.suptitle("Per-phenotype per-100-endocrine vs islet size — "
+                  "top 6 by prevalence (color = grade, ○ = sample 1, △ = sample 2)",
                   fontsize=11)
     fig.savefig(OUT / "04_islet_size_vs_immune.png",
                   dpi=200, bbox_inches="tight")
@@ -718,44 +871,126 @@ def fig11_spatial_overview(adata):
     plt.close()
 
 
-# ===== 12: Per-islet immune composition =====
+# ===== 12: Per-islet immune composition (per-100-endo, allowlist) =====
 def fig12_islet_composition():
     print("=== fig 12: top-islet composition stacked bars ===")
     df = pd.read_csv(ROOT / "data/processed/islet_infiltration_per100endo.csv",
                       dtype={"sample": str})
-    non_subtype = {"islet_id", "n_endocrine", "centroid_x", "centroid_y",
-                     "sample", "total_immune", "insulitis_grade"}
-    subtype_cols = [c for c in df.columns if c not in non_subtype]
+    rate_cols = [f"{S}_per100endo" for S in IMMUNE_SUBTYPES
+                  if f"{S}_per100endo" in df.columns]
     n_show = 12
     fig, axes = plt.subplots(2, 1, figsize=(14, 10),
                                 constrained_layout=True)
     cmap = plt.get_cmap("tab20")
     for ax, s in zip(axes, SAMPLES):
-        top = df[df["sample"] == s].nlargest(n_show, "total_immune").copy()
-        if len(top) == 0 or top["total_immune"].max() == 0:
+        top = (df[df["sample"] == s]
+                  .nlargest(n_show, "total_per100endo").copy())
+        if len(top) == 0 or top["total_per100endo"].max() == 0:
             ax.text(0.5, 0.5, f"{s}: no infiltrated islets",
                      transform=ax.transAxes, ha="center")
             continue
-        # Normalize to fractions for stacking
         ids = top["islet_id"].str.split("_").str[-1].values
         bottom = np.zeros(len(top))
         x = np.arange(len(top))
-        for i, st in enumerate(subtype_cols):
-            vals = top[st].values
-            ax.bar(x, vals, bottom=bottom, label=st, color=cmap(i % 20),
+        for i, col in enumerate(rate_cols):
+            S = col.replace("_per100endo", "")
+            vals = top[col].values
+            ax.bar(x, vals, bottom=bottom, label=S, color=cmap(i % 20),
                      edgecolor="black", linewidth=0.3)
             bottom += vals
         ax.set_xticks(x)
-        ax.set_xticklabels([f"{i}\n(endo={int(top.iloc[k]['n_endocrine'])})"
-                              for k, i in enumerate(ids)], fontsize=9)
-        ax.set_ylabel("Immune cells within 50 μm")
-        ax.set_title(f"{s} — top {n_show} most-infiltrated islets")
+        ax.set_xticklabels([f"{islet_num}\n(endo={int(top.iloc[k]['n_endocrine'])}\n{top.iloc[k]['composition_class']})"
+                              for k, islet_num in enumerate(ids)],
+                              fontsize=8)
+        ax.set_ylabel("Immune cells per 100 endocrine")
+        ax.set_title(f"{s} — top {n_show} islets by total_per100endo")
         ax.legend(loc="upper right", bbox_to_anchor=(1.18, 1.0),
                     fontsize=8, framealpha=0.95)
         ax.grid(True, alpha=0.3, axis="y")
-    plt.suptitle("Per-islet immune subtype composition (top infiltrated)",
+    plt.suptitle("Per-islet immune subtype composition (per-100-endocrine, "
+                  "immune-allowlist only — Acinar/Schwann/Endothelial excluded)",
                   fontsize=11)
     fig.savefig(OUT / "12_islet_immune_composition.png",
+                  dpi=200, bbox_inches="tight")
+    plt.close()
+
+
+# ===== 13: Combined-sample immune UMAP (all subtypes) =====
+def fig13_combined_immune_umap(adata):
+    print("=== fig 13: combined-sample immune UMAP ===")
+    if "X_umap" not in adata.obsm:
+        rep = ("X_scvi_immune" if "X_scvi_immune" in adata.obsm
+                else "X_scvi" if "X_scvi" in adata.obsm else None)
+        if rep is None:
+            sc.pp.pca(adata, n_comps=20, random_state=0)
+            rep = "X_pca"
+        print(f"    X_umap missing — recomputing on {rep}")
+        sc.pp.neighbors(adata, use_rep=rep, n_neighbors=20,
+                          metric="cosine", random_state=0)
+        sc.tl.umap(adata, min_dist=0.5, random_state=0)
+    fig, axes = plt.subplots(1, 3, figsize=(22, 7),
+                                constrained_layout=True)
+    sc.pl.embedding(adata, basis="X_umap", color="immune_subtype",
+                       ax=axes[0], show=False, size=4,
+                       legend_loc="right margin", legend_fontsize=8,
+                       title="Immune subtype")
+    sc.pl.embedding(adata, basis="X_umap", color="sample",
+                       ax=axes[1], show=False, size=4,
+                       title="Sample")
+    third_color = ("immune_cluster_consensus"
+                    if "immune_cluster_consensus" in adata.obs.columns
+                    else "distance_bin"
+                    if "distance_bin" in adata.obs.columns
+                    else "immune_subtype")
+    sc.pl.embedding(adata, basis="X_umap", color=third_color,
+                       ax=axes[2], show=False, size=4,
+                       title=third_color)
+    plt.suptitle(f"Combined-sample immune UMAP ({adata.n_obs:,} cells, "
+                  f"both samples concatenated)", fontsize=12)
+    fig.savefig(OUT / "13_combined_immune_umap.png",
+                  dpi=200, bbox_inches="tight")
+    plt.close()
+
+
+# ===== 14: All-subtype distance violin =====
+def fig14_all_subtype_distance_violin(adata):
+    print("=== fig 14: all-subtype distance violin ===")
+    df = adata.obs[["immune_subtype", "dist_to_islet_um", "sample"]].copy()
+    df["dist_to_islet_um"] = df["dist_to_islet_um"].astype(float)
+    df = df[df["immune_subtype"].astype(str).isin(IMMUNE_SUBTYPES)]
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6),
+                                sharey=True, constrained_layout=True)
+    order = [s for s in IMMUNE_SUBTYPES
+              if s in df["immune_subtype"].astype(str).unique()]
+    for ax, s in zip(axes, SAMPLES):
+        sub = df[df["sample"].astype(str) == s]
+        data = [np.log10(sub.loc[sub["immune_subtype"].astype(str) == k,
+                                    "dist_to_islet_um"].values + 1)
+                 for k in order]
+        if all(len(d) == 0 for d in data):
+            ax.text(0.5, 0.5, f"{s}: no immune cells",
+                     transform=ax.transAxes, ha="center")
+            continue
+        parts = ax.violinplot([d if len(d) else np.array([np.nan])
+                                  for d in data],
+                                showmeans=False, showmedians=True, widths=0.8)
+        for pc in parts["bodies"]:
+            pc.set_facecolor("#9ecae1")
+            pc.set_alpha(0.7)
+            pc.set_edgecolor("black")
+        ax.axhline(np.log10(ISLET_ZONE_UM + 1), ls="--", color="red",
+                     alpha=0.6, label=f"{int(ISLET_ZONE_UM)} μm (islet zone)")
+        ax.axhline(np.log10(PROXIMAL_UM + 1), ls=":", color="grey",
+                     alpha=0.6, label=f"{int(PROXIMAL_UM)} μm (proximal)")
+        ax.set_xticks(range(1, len(order) + 1))
+        ax.set_xticklabels(order, rotation=30, ha="right")
+        ax.set_ylabel("log₁₀(distance to islet + 1) μm")
+        ax.set_title(f"{s}  (n_immune = {len(sub):,})")
+        ax.legend(loc="upper left", fontsize=8)
+        ax.grid(True, alpha=0.3, axis="y")
+    plt.suptitle("Per-subtype distance to nearest islet (all 12 immune phenotypes)",
+                  fontsize=11)
+    fig.savefig(OUT / "14_all_subtype_distance_violin.png",
                   dpi=200, bbox_inches="tight")
     plt.close()
 
@@ -770,6 +1005,7 @@ if __name__ == "__main__":
     print(f"    samples: {a.obs['sample'].astype(str).value_counts().to_dict()}")
 
     fig01_insulitis_grades()
+    fig01b_per_phenotype_distribution()
     fig02_density_enrichment()
     fig03_distance_cdf(a)
     fig04_islet_size_immune()
@@ -781,6 +1017,8 @@ if __name__ == "__main__":
     fig10_tcell_de(a)
     fig11_spatial_overview(a)
     fig12_islet_composition()
+    fig13_combined_immune_umap(a)
+    fig14_all_subtype_distance_violin(a)
 
     print(f"\n=== DONE in {time.time()-t0:.0f}s ===")
     print(f"Figures saved to: {OUT}")

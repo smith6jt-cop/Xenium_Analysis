@@ -328,8 +328,9 @@ driver under a B200 node.
 ```
 Xenium_Analysis/
 ├── README.md                          # this file
-├── DATA_README.md                     # data organization
-├── IMPLEMENTATION_SUMMARY.md          # high-level overview
+├── HANDOFF.md                         # current state + per-session pickup notes
+├── CLAUDE.md                          # architectural decisions + repo guide
+├── DATA_README.md                     # data layout, h5ad contracts, headline CSVs
 ├── environment.yml                    # conda runtime (scanpy, scvi, R, ...)
 ├── pyproject.toml                     # ruff + pytest config, project metadata
 ├── requirements-ci.txt                # minimal deps for GitHub Actions
@@ -386,8 +387,9 @@ Xenium_Analysis/
 | `05_tissue_comparisons.ipynb` | multiple `*_annotated.h5ad` | `integrated_tissues.h5ad` |
 | `06_xenium_phenocycler_integration.ipynb` | Xenium + Phenocycler | `*_integrated.h5ad` |
 
-See [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) for per-notebook
-processing details.
+See [CLAUDE.md](CLAUDE.md) for per-stage processing details and architectural
+decisions. See [HANDOFF.md](HANDOFF.md) for the current state of saved h5ads
+and any in-progress work.
 
 ## Utility Package (`utils`)
 
