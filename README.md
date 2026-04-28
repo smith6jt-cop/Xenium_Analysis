@@ -122,15 +122,20 @@ sbatch scripts/slurm/run_full_pipeline.sh
 Raw h5 / Xenium output
           │
           ▼
-01_preprocessing.ipynb            ──▶ *_preprocessed.h5ad
+01_preprocessing_v2.ipynb         ──▶ *_preprocessed.h5ad
+   GPU: rsc.pp.{scale, pca, neighbors}; CPU: UMAP + leiden(igraph)
           │
           ▼
-02_phenotyping.ipynb              ──▶ *_annotated.h5ad
+02_phenotyping.ipynb              ──▶ *_phenotyped.h5ad
+   GPU: scVI on B200 (TF32 Tensor Cores), rsc.pp.neighbors x2
+   CPU: UMAP + leiden(igraph)
           │                                │
           │                                └──▶ export_for_xenium_explorer()
           │                                      ▶ analysis.zarr.zip + CSV
           ▼
 03_spatial_analysis.ipynb         ──▶ *_spatial_analysis.h5ad
+   GPU: rsc.gr.spatial_autocorr (Moran I), cuML KMeans + cuML NN
+   CPU: squidpy spatial_neighbors, nhood_enrichment, ligrec, ripley
           │
           ▼
 04_group_comparisons.ipynb        ──▶ DEG tables, volcanos
@@ -141,6 +146,13 @@ Raw h5 / Xenium output
           ▼
 06_xenium_phenocycler_integration ──▶ *_integrated.h5ad
 ```
+
+> **GPU prerequisite**: stages 01–03 require the LD_PRELOAD env fix
+> in `scripts/run_local_pipeline.sh` to import the rapids stack
+> (cudf 24.12 + numba_cuda 0.0.17 + pynvjitlink 0.7 conflict). Without
+> the env fix, every `import rapids_singlecell` raises and the notebooks
+> silently fall back to CPU. See [`HANDOFF.md`](HANDOFF.md) §5 for the
+> "verify GPU paths fired" check.
 
 ## Exporting Clusters / Phenotypes to Xenium Explorer
 
@@ -295,13 +307,21 @@ scancel <JOBID>
 
 ### Default resource allocations
 
-| Step | CPUs | Memory | Time |
-|------|-----:|-------:|-----:|
-| Preprocessing | 8 | 64 GB | 24 h |
-| Phenotyping | 8 | 64 GB | 24 h |
-| Spatial analysis | 16 | 128 GB | 48 h |
-| Full pipeline | 16 | 128 GB | 96 h |
-| Test suite | 4 | 32 GB | 2 h |
+The local-pipeline driver (`scripts/run_local_pipeline.sh`) is intended
+to run inside an existing GPU tunnel session — request a B200 + 64 CPU
++ 512 GB RAM node first (`vscode_gpu.sh`), then run the driver inline.
+
+| Step | CPUs | Memory | GPU | Time (post-GPU patches) |
+|------|-----:|-------:|-----|-----:|
+| 01 Preprocessing (per sample) | 64 | 200 GB | B200 | ~30–40 min |
+| 02 Phenotyping (per sample)   | 64 | 200 GB | B200 | ~60–75 min |
+| 03 Spatial analysis (per sample) | 64 | 200 GB | B200 | ~15–20 min |
+| Full pipeline (both samples)  | 64 | 200 GB | B200 | ~3.5 h |
+| Test suite | 4 | 32 GB | — | 2 h |
+
+The legacy SLURM scripts (`scripts/slurm/0[1-3]_*.sh`) target CPU-only
+non-GPU partitions and are not the recommended path. Use the local
+driver under a B200 node.
 
 ## Directory Structure
 

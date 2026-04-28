@@ -32,11 +32,19 @@ export OPENBLAS_NUM_THREADS="$NCPU"
 # scVI / PyTorch: use the single B200 GPU by default.
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 
-# CUDA toolkit for rapids_singlecell / cuml / cupy
+# CUDA toolkit for rapids_singlecell / cuml / cupy.
+# Driver=12.8 ships at /apps/compilers/cuda/12.8.1; cupy/torch wheels bundle
+# libcudart 12.9. Without intervention cudf 24.12 calls pynvjitlink.patch_numba_linker()
+# (because driver<runtime), which raises RuntimeError because numba_cuda already
+# provides those patches. LD_PRELOAD-ing libcudart 12.8 makes runtime==driver, so
+# cudf skips the MVC patch entirely and rapids imports cleanly.
+# The LD_PRELOAD also brings in conda's libstdc++ first to avoid the older system
+# libstdc++ being picked up via the cuda toolkit dir (matplotlib needs CXXABI_1.3.15).
 export CUDA_PATH="${CUDA_PATH:-/apps/compilers/cuda/12.8.1}"
 export CUDA_HOME="${CUDA_HOME:-/apps/compilers/cuda/12.8.1}"
 export PATH="$CUDA_PATH/bin:$PATH"
-export LD_LIBRARY_PATH="$CUDA_PATH/lib64:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="$CUDA_PATH/lib64:$CUDA_HOME/nvvm/lib64:${LD_LIBRARY_PATH:-}"
+export LD_PRELOAD="${CONDA_PREFIX}/lib/libstdc++.so.6:${CUDA_HOME}/lib64/libcudart.so.12${LD_PRELOAD:+:${LD_PRELOAD}}"
 export NUMBA_CUDA_ENABLE_PYNVJITLINK=1
 
 SAMPLES_DEFAULT="0041323 0041326"

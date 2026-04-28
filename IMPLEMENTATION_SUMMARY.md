@@ -19,18 +19,21 @@ and SLURM infrastructure for the University of Florida HiPerGator cluster.
 - Processing (10x-aligned QC): drop control probes, `min_counts=50`,
   `min_genes=20`, adaptive `max_counts=98%-ile`, `min_cells=100`;
   `normalize_total` (median target), `log1p`; HVG (seurat_v3, metadata
-  only — PCA uses all panel genes); `sc.pp.scale(zero_center=False)`
-  to keep matrix sparse; randomized-SVD PCA `n_comps=30`,
-  `random_state=0`; cosine neighbors, `min_dist=0.5` UMAP, `igraph`
-  leiden with `n_iterations=-1`. Squidpy decorative stats
-  (centrality / nhood_enrichment permutations / Moran's I) are
-  **skipped** at this scale.
+  only — PCA uses all panel genes); **GPU `rsc.pp.scale(zero_center=False)`**;
+  **GPU `rsc.pp.pca(n_comps=30)`**; **GPU `rsc.pp.neighbors(k=15, cosine)`**;
+  CPU `sc.tl.umap(min_dist=0.5)` (rapids UMAP outliers — see CLAUDE.md);
+  CPU `sc.tl.leiden(resolution=1.5, flavor='igraph', n_iterations=-1)`
+  (cugraph leiden has dask-cuda 24.12 vs dask 2026.1 version drift).
+  Squidpy decorative stats (centrality / nhood_enrichment permutations /
+  Moran's I) are **skipped** at this scale.
+- Cell 1 enables B200 TF32 (`torch.set_float32_matmul_precision('high')`).
 - Output: `data/processed/{sample}/{sample}_preprocessed.h5ad` (~100 GB)
-- **Not required**: stage 02 ingests directly from zarr (cell 3
-  has a standalone branch).
+  with `leiden_1.5` in obs, `counts`/`lognorm` in layers, `X_pca`/`X_umap`
+  in obsm — verified output contract for stage 02.
+- **Not required**: stage 02 cell 3 ingests directly from zarr if the
+  preprocessed h5ad is missing.
 - Legacy variants (`01_preprocessing.ipynb`,
-  `01_preprocessing_panc.ipynb`) live under
-  `notebooks/legacy/` and must not be run.
+  `01_preprocessing_panc.ipynb`) live under `notebooks/legacy/`.
 
 #### 2. Phenotyping (`02_phenotyping.ipynb`) — **PRIMARY ENTRY POINT**
 - Input: zarr OR `_preprocessed.h5ad` (auto-detected in cell 3)
@@ -48,30 +51,37 @@ and SLURM infrastructure for the University of Florida HiPerGator cluster.
 - scVI training (cell 17): `layer='counts'`, `n_latent=30`,
   `gene_likelihood='nb'`, `continuous_covariate_keys=['cell_area']`
   (NO `total_counts` — NB likelihood already models library size),
-  GPU when available, `max_epochs=200` with early stopping.
-- scanpy CPU UMAP + leiden on `X_scvi` (cosine, `min_dist=0.5`,
-  `random_state=0`, leiden resolution 1.0).
+  **GPU on B200 with TF32 / Tensor Cores enabled** (cell 1 sets
+  `torch.set_float32_matmul_precision('high')`, ~30-50% scVI speedup),
+  `max_epochs=200` with early stopping.
+- **GPU `rsc.pp.neighbors(use_rep='X_scvi', cosine)`** (cuML kNN —
+  ~15s on 1.2M cells vs ~15 min CPU pynndescent), then CPU
+  `sc.tl.umap` + CPU `sc.tl.leiden(resolution=1.0, flavor='igraph')`.
 - Quantitative validation: Spearman ρ between each UMAP axis and
   `total_counts` rendered to `umap_qc_overlay.png`. Both samples
   currently < 0.3 (passing).
-- 10x-canonical PCA-fallback embedding stored as `X_umap_pca` /
-  `leiden_pca` for independent sanity check.
+- **GPU `rsc.pp.neighbors(use_rep='X_pca')`** for the PCA-fallback
+  embedding stored as `X_umap_pca` / `leiden_pca`.
 - Output: `data/processed/{sample}/{sample}_phenotyped.h5ad` (~60 GB)
 - Recommended follow-up: call `utils.export_for_xenium_explorer()` to push
   clusters / phenotypes straight into Xenium Explorer (see the Xenium
   Explorer Export Module section below)
 
 #### 3. Spatial Analysis (`03_spatial_analysis.ipynb`)
+- Cell 1 imports rapids/cuML (cuKMeans, cuNearestNeighbors, rsc).
 - Cell 2 slim adata (drop heavy obsm/obsp/uns we don't need at this stage)
-- Cell 4 `sq.gr.spatial_neighbors(n_neighs=10, delaunay=True)` on full data
+- Cell 4 `sq.gr.spatial_neighbors(n_neighs=10, delaunay=True)` on full
+  data — CPU, already fast.
 - Cell 6 `sq.gr.nhood_enrichment(n_perms=100, n_jobs=1, seed=0)` —
   `n_jobs>1` hits a numba/joblib readonly-array bug; sequential with
   reduced perms gives same statistical resolution
-- Cell 8 co-occurrence on 150 k subsample
-- Cell 10 Moran's I (`spatial_autocorr`) on 200 k subsample, top 100
-  genes, `n_jobs=16`
-- Cell 12 spatial niches via composition kmeans + 2-pass spatial
-  smoothing (Banksy-style)
+- Cell 8 co-occurrence on 150 k subsample (CPU squidpy)
+- Cell 10 **GPU Moran's I (`rsc.gr.spatial_autocorr`)** — attempts full
+  1.2M cells; 200k subsample retained as graceful fallback if OOM.
+- Cell 12 spatial niches via **GPU `cuml.cluster.KMeans` (n_clusters=12,
+  scalable-k-means++)** on composition vectors built from **GPU
+  `cuml.neighbors.NearestNeighbors`** k=50 spatial graph + 2-pass
+  numpy majority-vote smoothing (Banksy-style).
 - Cell 14 `sq.gr.ligrec` on 100 k subsample, n_perms=50
 - Cell 16 `sq.gr.ripley` on 100 k subsample
 - Cell 18 defensive try/except CSV exports + h5ad save
@@ -184,6 +194,31 @@ in the lightweight CI environment without scanpy.
 
 `pyproject.toml` declares Python 3.10 as the project minimum so
 contributors with older systems can still run the lint and test suite.
+
+#### GPU stack (HiPerGator B200 node)
+
+- `rapids_singlecell == 0.14.1` (required for scanpy 1.12 API compat)
+- `cudf-cu12 == 24.12`, `cuml-cu12 == 24.12`, `rmm-cu12 == 24.12.1`
+- `cupy-cuda12x == 14.0.1`, `numba-cuda == 0.0.17.1`,
+  `pynvjitlink-cu12 == 0.7.0`
+- `torch == 2.10.0` with CUDA 12.9, cudnn 91002 (B200 native)
+
+**Critical env vars set by `scripts/run_local_pipeline.sh`** —
+required for the rapids stack to import:
+
+```bash
+export CUDA_HOME=/apps/compilers/cuda/12.8.1
+export LD_LIBRARY_PATH="$CUDA_HOME/lib64:$CUDA_HOME/nvvm/lib64:$LD_LIBRARY_PATH"
+export LD_PRELOAD="$CONDA_PREFIX/lib/libstdc++.so.6:$CUDA_HOME/lib64/libcudart.so.12"
+```
+
+The `LD_PRELOAD` line pins runtime libcudart to 12.8 (matching the
+driver), which makes `cudf 24.12._setup_numba()` skip the
+MVC patch path that would otherwise call `pynvjitlink.patch_numba_linker()`
+and raise `RuntimeError: numba_cuda includes patches from pynvjitlink`.
+Conda's `libstdc++.so.6` is preloaded first to avoid the older system
+`/lib64/libstdc++.so.6` (no CXXABI_1.3.15) being pulled in alongside
+the cuda toolkit lib dir, which would break matplotlib.
 
 ### Documentation
 

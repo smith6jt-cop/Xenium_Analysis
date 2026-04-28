@@ -22,41 +22,55 @@ most acinar zymogens (PRSS1/2, CPA1/2, CTRB1/2, CELA1/2A/3A, REG1A/3A)
 are NOT on the panel**. Phenotyping uses surrogate markers — see the
 panel-aware marker dict in `notebooks/02_phenotyping.ipynb` cell 10.
 
-## Pipeline (current, post-2026-04-25)
+## Pipeline (current, GPU-accelerated post-2026-04-25)
+
+GPU annotations: **[GPU rsc]** uses `rapids_singlecell` (cuML kNN /
+PCA / scale / spatial_autocorr); **[GPU cuML]** uses `cuml.cluster` /
+`cuml.neighbors` directly; **[GPU torch]** uses scVI on B200 with TF32
+Tensor Cores enabled in cell 1; **[CPU]** is intentionally CPU.
 
 ```
 zarr (data/raw/{sample}.zarr)
   │
-  ├─► [optional] notebooks/01_preprocessing_v2.ipynb
+  ├─► notebooks/01_preprocessing_v2.ipynb  ← OPTIONAL (stage 02 can
+  │       ingest zarr directly), but rerun for clean fresh outputs.
+  │       Cell 1:    imports + B200 TF32 setup [GPU torch].
+  │       Cell 18:   counts layer → HVG (seurat_v3, metadata only) [CPU]
+  │                  → normalize_total + log1p + lognorm layer [CPU, fast]
+  │                  → anndata_to_GPU + rsc.pp.scale [GPU rsc]
+  │                  → rsc.pp.pca(n_comps=30) [GPU rsc]
+  │                  → anndata_to_CPU(convert_all=True)
+  │                  → rsc.pp.neighbors(k=15, cosine) [GPU rsc]
+  │                  → sc.tl.umap(min_dist=0.5) [CPU, intentional]
+  │                  → sc.tl.leiden(resolution=1.5, flavor='igraph') [CPU]
   │       → data/processed/{sample}/{sample}_preprocessed.h5ad
-  │       (NOT required — stage 02 ingests from zarr directly)
   │
-  └─► notebooks/02_phenotyping.ipynb  ← PRIMARY ENTRY POINT
+  └─► notebooks/02_phenotyping.ipynb  ← PRIMARY
+        Cell 1:    imports + B200 TF32 setup [GPU torch].
         Cell 3:    ingest zarr (or load preprocessed if present),
                    drop control probes, QC filter (min_counts=50,
                    min_genes=20, max_counts=98%-ile, min_cells=100),
                    counts layer preserved.
-        Cell 5:    normalize_total + log1p + lognorm layer.
-                   Marker discovery only if leiden_1.5 already exists
-                   (Xenium-builtin clustering from zarr).
+        Cell 5:    normalize_total + log1p + lognorm layer [CPU, fast].
+                   Marker discovery only if leiden_1.5 already exists.
         Cell 10:   panel-aware pancreas marker dict (NO INS/GCG/SST/PPY).
                    LOW_CONFIDENCE_TYPES = {Alpha, Delta, Epsilon, Acinar}.
-        Cell 13:   sc.tl.score_genes for each cell type.
+        Cell 13:   sc.tl.score_genes for each cell type [CPU, fast].
                    Plot deferred to cell 17 (so it lands on scVI UMAP).
         Cell 15:   argmax assignment → ANTI-ACINAR OVERRIDE
                    (per-cell mean of curated specific anti-acinar markers
                    in lognorm; reassign Acinar→alt if margin > 0)
                    → Indeterminate flagging for low-coverage types
                    (median - 1·MAD on celltype_confidence).
-        Cell 17:   scVI training (n_latent=30, gene_likelihood='nb',
-                   continuous_covariate_keys=['cell_area'], NO total_counts)
-                   → sc.pp.neighbors(use_rep='X_scvi', metric='cosine')
-                   → sc.tl.umap(min_dist=0.5, random_state=0)
-                   → sc.tl.leiden(resolution=1.0, flavor='igraph',
-                                  n_iterations=-1, random_state=0)
-                   → umap_qc_overlay.png (validation: Spearman ρ < 0.3
-                     between each UMAP axis and total_counts)
-                   → PCA-fallback embedding (X_umap_pca, leiden_pca)
+        Cell 17:   scVI training [GPU torch, TF32]
+                   (n_latent=30, gene_likelihood='nb',
+                    continuous_covariate_keys=['cell_area'], NO total_counts)
+                   → rsc.pp.neighbors(use_rep='X_scvi', cosine) [GPU rsc]
+                   → sc.tl.umap(min_dist=0.5, random_state=0) [CPU]
+                   → sc.tl.leiden(resolution=1.0, flavor='igraph') [CPU]
+                   → umap_qc_overlay.png (Spearman ρ < 0.3 gate)
+                   → rsc.pp.neighbors(use_rep='X_pca') [GPU rsc] +
+                     PCA-fallback UMAP (X_umap_pca, leiden_pca, both CPU).
                    → celltype_scores_umap.png + predicted_celltypes.png
                      rendered HERE on scVI UMAP.
         Cell 20:   per-cluster consensus annotation
@@ -64,19 +78,20 @@ zarr (data/raw/{sample}.zarr)
         Cell 22:   final celltypes overview, save to {sample}_phenotyped.h5ad.
         │
         └─► notebooks/03_spatial_analysis.ipynb
-              Cell 2:    load + slim adata (drop X_pca, X_scvi, X_umap_pca,
-                         scvi_connectivities, etc. — keeps spatial workflow
-                         RAM bounded).
-              Cell 4:    sq.gr.spatial_neighbors(n_neighs=10, delaunay) on full.
-              Cell 6:    sq.gr.nhood_enrichment(n_perms=100, n_jobs=1)
-                         (n_jobs>1 hits a numba/joblib readonly-array bug)
-              Cell 8:    sq.gr.co_occurrence on 150k subsample.
-              Cell 10:   Moran's I on 200k subsample, n_jobs=16, top 100
-                         genes by mean expression.
-              Cell 12:   spatial niches via composition kmeans + 2-pass
-                         spatial smoothing (Banksy-style).
-              Cell 14:   sq.gr.ligrec on 100k subsample, n_perms=50.
-              Cell 16:   sq.gr.ripley on 100k subsample.
+              Cell 1:    imports including cuKMeans, cuNearestNeighbors.
+              Cell 2:    load + slim adata (drop X_pca, X_scvi, etc.).
+              Cell 4:    sq.gr.spatial_neighbors(n_neighs=10, delaunay) [CPU, fast].
+              Cell 6:    sq.gr.nhood_enrichment(n_perms=100, n_jobs=1) [CPU,
+                         documented numba/joblib readonly-array workaround].
+              Cell 8:    sq.gr.co_occurrence on 150k subsample [CPU].
+              Cell 10:   rsc.gr.spatial_autocorr (Moran's I) [GPU rsc] —
+                         attempts full 1.2M cells; 200k subsample retained
+                         as fallback if OOM.
+              Cell 12:   spatial niches: cuML NearestNeighbors (k=50, brute) [GPU cuML]
+                         + cuML KMeans (n_clusters=12, scalable-k-means++) [GPU cuML]
+                         + 2-pass numpy majority-vote smoothing [CPU, fast].
+              Cell 14:   sq.gr.ligrec on 100k subsample, n_perms=50 [CPU].
+              Cell 16:   sq.gr.ripley on 100k subsample [CPU].
               Cell 18:   defensive try/except CSV exports + h5ad save.
 ```
 
@@ -92,13 +107,59 @@ present in `notebooks/` but not part of the per-sample default flow.
    curated. HVG is metadata-only.
 3. **Squidpy graph stats are subsampled.** Full 1.2M-cell ops with
    permutation tests or all-pairs Dijkstra are infeasible.
-   `centrality_scores` skipped entirely.
+   `centrality_scores` skipped entirely. (Moran's I via
+   `rsc.gr.spatial_autocorr` runs full-1.2M on GPU now — see #7.)
 4. **scanpy CPU UMAP, not rapids/cuML.** Rapids UMAP produced extreme
-   outliers on this data.
-5. **`leiden` flavor=`igraph`, `n_iterations=-1`** — orders of
-   magnitude faster than leidenalg on 1 M cells.
+   outliers on this data. **Other ops (scale, PCA, neighbors, KMeans,
+   Moran's I, score_genes) ARE on GPU via `rapids_singlecell` — only
+   UMAP and leiden stay CPU.**
+5. **`leiden` flavor=`igraph`, `n_iterations=-1`** — fast enough on
+   CPU; we don't switch to cugraph leiden because `dask-cuda 24.12`
+   has a hard incompat with the installed `dask 2026.1`.
 6. **Pin random_state=0 everywhere** — PCA, neighbors, UMAP, leiden,
    scVI training. Reproducibility is non-negotiable.
+7. **Driver-script env fix is required for GPU paths.**
+   `scripts/run_local_pipeline.sh` exports `LD_PRELOAD` (conda
+   `libstdc++.so.6` + `/apps/compilers/cuda/12.8.1/lib64/libcudart.so.12`)
+   and adds `$CUDA_HOME/nvvm/lib64` to `LD_LIBRARY_PATH`. Without these,
+   `cudf` 24.12 calls `pynvjitlink.patch_numba_linker()` and raises
+   `RuntimeError` because `numba_cuda` 0.0.17.1 already provides those
+   patches — every `import rapids_singlecell` fails and the notebooks
+   silently fall back to CPU. The LD_PRELOAD pins runtime libcudart at
+   12.8 (matching driver 12.8), so the MVC patch is skipped entirely.
+8. **B200 Tensor Cores must be enabled for scVI.** Cell 1 of stages
+   01/02/03 sets `torch.set_float32_matmul_precision('high')` and
+   `torch.backends.cuda.matmul.allow_tf32 = True`. Without this scVI
+   training takes ~30-50% longer on B200 (compute capability 10.0).
+9. **`rapids_singlecell == 0.14.1`** — required for scanpy 1.12 API
+   compat (the older 0.11.1 calls `_handle_mask_var` with the wrong
+   signature for scanpy 1.12+).
+10. **Upper QC filter is DENSITY-based (counts/cell_area), not absolute
+    counts.** In FFPE Xenium, `cell_area` varies 5-10x and Spearman
+    (total_counts, cell_area) ≈ 0.78 in this dataset, so an absolute-counts
+    upper cap predominantly removes large *healthy* cells (acinar /
+    ductal / large epithelial) — 88% of cells dropped by `counts > q98`
+    have completely normal counts/area density. We use `counts/area > q98`
+    to drop genuine outlier-density cells (likely doublets) instead.
+    Lower bounds remain absolute (`min_counts=50`, `min_genes=20`)
+    because those are sanity floors for noise/segmentation artifacts,
+    not size-correlated. Implemented in stage 01 cell 14 and stage 02
+    cell 3 (standalone branch).
+11. **Lineage phenotyping (post-density-filter doublet refinement).**
+    Implemented in stage 02 cell 22 (and as a post-hoc script
+    `scripts/lineage_phenotype.py`). For each cell, count how many
+    distinct markers from each canary lineage panel are detected at raw
+    count ≥ 3 ("depth"). When ≥ 2 mutually-exclusive groups are
+    co-detected, the cell is resolved to the dominant lineage if
+    `top_depth − second_depth ≥ 2 AND top_depth ≥ 2`; tagged
+    `lineage_phenotyped` and `celltype_lineage` is set to the dominant
+    lineage. ≥ 3 mutually-exclusive groups co-detected → tagged
+    `doublet_suspected` (segmentation merge), kept as-is.
+    `celltype` is NEVER overwritten — `celltype_lineage` is the refined
+    column for downstream consumers. Acinar canary panel was expanded
+    from `[AMY1A]` to `[AMY1A, CUZD1]` so depth comparisons are fair
+    across all lineages. The exact panels live in
+    `scripts/verify_upper_tail_doublets.py::CANARY_PANELS`.
 
 ## Repo layout (current)
 
@@ -136,6 +197,17 @@ notebooks/executed/{sample}/      # nbconvert-executed notebook copies (debug)
 
 ## Common operations
 
+### Run the whole pipeline (stages 01 → 02 → 03) from scratch
+```bash
+cd /blue/maigan/smith6jt/Xenium_Analysis
+STAGES="01 02 03" nohup bash scripts/run_local_pipeline.sh \
+    > logs/pipeline_driver_$(date +%Y%m%d_%H%M%S).log 2>&1 &
+```
+Total wall time on B200 GPU + 64 CPU node: ≈ 3.5 h for both samples
+(stage 01 ≈ 30–40 min/sample, stage 02 ≈ 60–75 min/sample, stage 03
+≈ 15–20 min/sample). Stage 02 alone on CPU was ~2 h 10 min/sample
+pre-GPU; stage 03 was ~30 min/sample.
+
 ### Re-run stage 02 only (most common after a notebook edit)
 ```bash
 cd /blue/maigan/smith6jt/Xenium_Analysis
@@ -164,6 +236,21 @@ um = a.obsm.get("X_umap_scvi", a.obsm["X_umap"])
 print(spearmanr(um[:, 0], a.obs["total_counts"]))  # |ρ| should be < 0.3
 print(a.obs["leiden_scvi"].nunique())              # ≈ 15-20 at resolution 1.0
 print(a.obs["celltype"].value_counts())            # cell-type breakdown
+```
+
+### Verifying GPU paths actually fired
+```bash
+# After a run finishes:
+grep -E "TF32 enabled|rsc.pp|cuML KMeans|cuNearestNeighbors|GPU:" \
+    notebooks/executed/0041323/02_0041323.ipynb | head -10
+```
+If you see only `sc.pp.*` and no `rsc.*` / `cuML` / `TF32` lines, the
+LD_PRELOAD env fix in the driver script wasn't picked up and rapids
+imports silently failed (notebook fell back to CPU). Re-source the
+driver, then verify:
+```bash
+LD_PRELOAD=$CONDA_PREFIX/lib/libstdc++.so.6:/apps/compilers/cuda/12.8.1/lib64/libcudart.so.12 \
+python -c "import rapids_singlecell as rsc; print(rsc.__version__)"
 ```
 
 ## Background on the original failure mode
