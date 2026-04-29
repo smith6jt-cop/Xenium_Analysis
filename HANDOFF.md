@@ -607,3 +607,72 @@ Notebook edits **still pending** (must be done before pipeline kickoff):
 Wall-time after kickoff: ~3.5–4 h on the B200 GPU node for stages 01 + 02 + 03,
 followed by `refine_rare_celltypes.py` (~5 min), `insulitis_analysis.py`
 (~30 s), `figs_07_immune.py` (~5 min), and `verify_rare_celltypes.py` (~10 min).
+
+### 2026-04-29 — Reanalysis EXECUTED + Acinar hotfix
+
+Full pipeline run: 2026-04-28 18:52 → 2026-04-29 01:47 (~6h 55m). Stage timings:
+- 01/0041323 = 47:46, 01/0041326 = 1h 1m 47s
+- 02/0041323 = 1h 35m 57s, 02/0041326 = 2h 6m 8s
+- 03/0041323 = 16m 55s, 03/0041326 = 16m 24s
+- regate_immune ≈ 5 min, rerun_immune_pipeline ≈ 4 min
+- fix_acinar_argmax ≈ 11 min, refine_rare_celltypes ≈ 8 min
+- post chain (insulitis + figs + verify) ≈ 17 min total
+
+**Critical mid-run hotfix**: my notebook 02 cell 10 patch had Acinar markers
+as `['AMY1A', 'AMY2A', 'AMY2B']` — but only AMY1A + CUZD1 are actually on the
+panel. The ≥2-gene rule then dropped Acinar, and ~700K acinar cells argmax-
+distributed across other types (B_cells ballooned to 464K). `scripts/fix_acinar_argmax.py`
+(NEW, post-stage-02 hotfix) re-scored Acinar with `[AMY1A, CUZD1]`, re-argmaxed
+across all 13 score columns, re-applied the anti-acinar override, and updated
+both phenotyped and spatial h5ads in-place. Backups at `*.bak.preAcinarFix`.
+The patch script + refine_rare_celltypes panel definitions both now use the
+correct Acinar panel for future runs.
+
+**Final celltype verification (post-Acinar-fix + refine):**
+
+| Type | 0041323 (female) | 0041326 (male, T1D-progressed) | dotplot_pass |
+|---|---:|---:|---|
+| Acinar | 786,797 (68.7%) | 179,540 (15.4%) | (not in rare-verify) |
+| Indeterminate (margin <0.2) | 147,900 | 614,974 | n/a |
+| Indeterminate_*_lowcoverage | ~179K | ~317K | n/a |
+| Beta | 178 (0.02%) | 17 | ✅ both |
+| Alpha | 4,560 (0.40%) | 11,640 (1.00%) | ✅ both |
+| Delta | 514 | 1,149 | ✅ both |
+| Gamma (rule-based) | 0 | 2 | ✅ sample 2 |
+| **Epsilon (rule-based)** | **9** | **3** | ✅ — was 150,230 with old bug, **99.99% reduction** |
+| Schwann | 752 | 877 | ✅ both |
+| Endothelial | 813 | 1,567 | ✅ both |
+
+The high Indeterminate counts in 0041326 are an artefact of the user-locked
+strict 0.2 margin gate × that sample's inherently lower per-cell detection.
+Lowering the margin to 0.1 would recover most. Decision deferred to user.
+
+**Headline insulitis (current run, post-Acinar-fix):**
+
+| Subtype | 0041323 % insulitis | 0041326 % insulitis |
+|---|---:|---:|
+| absolute_total (CT 3/6) | **64.9%** (146/225 islets) | **78.7%** (266/338) |
+| T_helper | 2.7% | 4.7% |
+| NK | 2.7% | 3.0% |
+| Monocyte | 3.1% | 2.1% |
+| DC | 0.9% | 2.7% |
+| B_plasma | 0.0% | 1.8% |
+| T_cytotoxic | 0.0% | 1.5% |
+| Macro_resident | 0.0% | 1.5% |
+| T_reg | 0.4% | 1.2% |
+| T_exhausted | 0.0% | 0.9% |
+
+0041326 has elevated T_helper, T_cytotoxic, T_exhausted, T_reg, B_plasma,
+DC, Macro_resident — consistent with active T1D auto-immune insulitis.
+0041323 shows mostly innate (Monocyte) + some T_helper / NK.
+
+**Cross-sample prevalence ratios (n=2, informational):**
+- Beta: 10.3× lower in 0041326 → β-cell loss in T1D ✓ biological signal
+- Alpha: 2.5× higher in 0041326 → α-cell hyperplasia (classic T1D)
+- Delta: 2.2× higher in 0041326
+
+**All headline outputs**: see DATA_README.md for the canonical table; CSVs
++ figures all timestamped 2026-04-29 01:30–01:47.
+
+**Backups**: `*.bak.preAcinarFix` for both phenotyped + spatial h5ads. Total
+~36 GB of backup data; can be cleaned later if disk pressure.

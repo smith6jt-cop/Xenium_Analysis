@@ -96,6 +96,8 @@ def stage_01(sample):
         colorbar_title="scaled mean\nexpression",
         size_title="fraction of cells\nin group (%)",
         show=False, return_fig=True,
+        dot_min=0.0, dot_max=1.0, smallest_dot=15,
+        mean_only_expressed=True,
     )
     add_separators(dp, marker_genes, color="black")
     plt.savefig(fig_dir / "marker_dotplot.png", dpi=300, bbox_inches="tight")
@@ -142,6 +144,8 @@ def stage_02(sample):
             vmin=0.0, vmax=1.0, standard_scale="var",
             swap_axes=False, var_group_rotation=90, show=False,
             return_fig=True,
+            dot_min=0.0, dot_max=1.0, smallest_dot=15,
+            mean_only_expressed=True,
         )
         add_separators(dp, available_markers, color="black")
         plt.savefig(fig_dir / "dotplot_markers_by_cluster.png", dpi=300, bbox_inches="tight")

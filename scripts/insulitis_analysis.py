@@ -28,7 +28,18 @@ import scanpy as sc
 ROOT = Path("/blue/maigan/smith6jt/Xenium_Analysis")
 SAMPLES = ("0041323", "0041326")
 
-ENDO_LABELS = {"Endocrine", "Beta", "Alpha", "Delta", "Endocrine_pan"}
+ENDO_LABELS = {
+    "Endocrine", "Beta", "Alpha", "Delta", "Endocrine_pan", "Gamma", "Epsilon",
+    # Include cells flagged Indeterminate by the strict 30%-panel-coverage gate
+    # — they're still likely endocrine, just with weaker multi-marker support
+    # (especially in low-detection sample 0041326).
+    "Indeterminate_Endocrine_lowcoverage",
+    "Indeterminate_Beta_lowcoverage",
+    "Indeterminate_Alpha_lowcoverage",
+    "Indeterminate_Delta_lowcoverage",
+    "Indeterminate_endocrine",
+    "Indeterminate_Endocrine",
+}
 EPS_UM = 50.0
 MIN_SAMPLES = 10
 

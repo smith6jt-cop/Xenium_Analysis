@@ -58,7 +58,7 @@ def patch_nb01_cell18(cell):
 # the audit-aware feature set.
 if 'panel_for_embedding' not in adata.var.columns:
     import pandas as _pd
-    _audit = _pd.read_csv('data/processed/panel_audit.csv')
+    _audit = _pd.read_csv('/blue/maigan/smith6jt/Xenium_Analysis/data/processed/panel_audit.csv')
     _nonsex = set(_audit.loc[(_audit['exclude_recommended']=='yes') &
                               (_audit['category']!='sex_chromosome'), 'gene'])
     _sex_chrom = set(_audit.loc[_audit['category']=='sex_chromosome', 'gene'])
@@ -200,7 +200,9 @@ pancreas_markers = {
     # pan-endocrine is the multi-marker definition).
     'Endocrine':     ['CHGA', 'INSM1', 'ISL1', 'NEUROD1', 'FEV', 'PAX6', 'SCG5',
                       'SCG2', 'SCGN'],
-    'Acinar':        ['AMY1A', 'AMY2A', 'AMY2B'],
+    # Acinar: only AMY1A + CUZD1 are on the panel (verified panel_audit.csv).
+    # AMY2A/B, CTRB1/2, CPA1/2, CELA*, PRSS1/2, REG*, GP2 are all absent.
+    'Acinar':        ['AMY1A', 'CUZD1'],
     'Ductal':        ['KRT19', 'SOX9', 'HNF1B', 'MUC1', 'CFTR', 'KRT7'],
     'Stellate':      ['ACTA2', 'PDGFRB', 'RGS5', 'PDGFRA', 'DCN', 'COL1A1'],
     'Endothelial':   ['PECAM1', 'CDH5', 'CLDN5', 'PLVAP', 'KDR', 'ENG', 'VWF'],

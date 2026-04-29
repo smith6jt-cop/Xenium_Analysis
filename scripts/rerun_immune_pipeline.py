@@ -296,8 +296,8 @@ def main():
             "islet_infiltration_per100endo.csv, islet_insulitis_grades.csv)\n"
             "  are now owned by scripts/insulitis_analysis.py "
             "(per-phenotype dynamic grading).", flush=True)
-    print("  Run: python scripts/insulitis_analysis.py", flush=True)
-    raise SystemExit(0)
+    print("  Run: python scripts/insulitis_analysis.py for headline tables", flush=True)
+    # Continue to immune h5ad saves — those are still owned by this script.
 
     # ---- Save final immune h5ad ----
     p_out = ROOT / "data/processed/immune_combined_phenotyped.h5ad"

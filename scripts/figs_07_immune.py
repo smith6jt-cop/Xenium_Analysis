@@ -575,6 +575,9 @@ def fig06_immune_marker_dotplot(adata):
     dp = sc.pl.dotplot(adata, var_names=use, groupby="immune_subtype",
                           use_raw=False, layer="lognorm",
                           standard_scale="var",
+                          dot_min=0.0, dot_max=1.0,
+                          smallest_dot=40,  # minimum drawing size so low-expression genes stay visible
+                          mean_only_expressed=True,
                           return_fig=True,
                           figsize=(max(13, len(flat)*0.27), 7))
     dp.make_figure()
@@ -608,6 +611,9 @@ def fig07_tcell_marker_dotplot(adata):
                           groupby="immune_subtype",
                           use_raw=False, layer="lognorm",
                           standard_scale="var",
+                          dot_min=0.0, dot_max=1.0,
+                          smallest_dot=40,  # min drawing size so low-expression genes stay visible
+                          mean_only_expressed=True,
                           return_fig=True,
                           figsize=(16, 6))
     dp.make_figure()
