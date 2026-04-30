@@ -27,13 +27,14 @@ sudo apt-get install -y --no-install-recommends \
 # 2. R 4.4+ (CRAN apt repo)
 # -------------------------------------------------------------------
 if ! command -v R >/dev/null 2>&1 || \
-   awk -v ver="$(R --version 2>/dev/null | head -1 | awk '{print $3}')" \
-       'BEGIN{exit !(ver < "4.4.0")}'; then
+   dpkg --compare-versions \
+        "$(R --version 2>/dev/null | head -1 | awk '{print $3}')" lt "4.4.0"; then
   wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc \
-    | sudo tee /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc >/dev/null
+    | gpg --dearmor \
+    | sudo tee /usr/share/keyrings/cran-archive-keyring.gpg >/dev/null
   CODENAME=$(lsb_release -cs)
-  echo "deb https://cloud.r-project.org/bin/linux/ubuntu ${CODENAME}-cran40/" \
-    | sudo tee /etc/apt/sources.list.d/cran-r.list
+  echo "deb [signed-by=/usr/share/keyrings/cran-archive-keyring.gpg] https://cloud.r-project.org/bin/linux/ubuntu ${CODENAME}-cran40/" \
+    | sudo tee /etc/apt/sources.list.d/cran-r.list >/dev/null
   sudo apt-get update
   sudo apt-get install -y --no-install-recommends r-base r-base-dev
 fi
@@ -41,8 +42,12 @@ fi
 # -------------------------------------------------------------------
 # 3. Quarto (for the export tab's static report)
 # -------------------------------------------------------------------
-if ! command -v quarto >/dev/null 2>&1; then
-  QV="1.6.40"
+QV="1.6.40"
+quarto_installed=""
+if command -v quarto >/dev/null 2>&1; then
+  quarto_installed=$(quarto --version 2>/dev/null | head -1 | tr -d '[:space:]')
+fi
+if [ "${quarto_installed}" != "${QV}" ]; then
   wget -q "https://github.com/quarto-dev/quarto-cli/releases/download/v${QV}/quarto-${QV}-linux-amd64.deb" \
     -O /tmp/quarto.deb
   sudo dpkg -i /tmp/quarto.deb
@@ -50,7 +55,7 @@ if ! command -v quarto >/dev/null 2>&1; then
 fi
 
 # -------------------------------------------------------------------
-# 4. Site-wide ~/.Rprofile — Posit Public Package Manager binaries.
+# 4. User-level ~/.Rprofile — Posit Public Package Manager binaries.
 #    PPM URL format is /cran/__linux__/<codename>/latest; HTTPUserAgent
 #    must be set for binary delivery.
 # -------------------------------------------------------------------
@@ -87,8 +92,14 @@ EOF
 # 5. Persistent R library + renv cache
 # -------------------------------------------------------------------
 mkdir -p "$HOME/.R/library" "$HOME/.cache/R/renv"
-echo 'R_LIBS_USER="$HOME/.R/library"' >> "$HOME/.Renviron"
-echo "RENV_PATHS_CACHE=$HOME/.cache/R/renv" >> "$HOME/.Renviron"
+renviron="$HOME/.Renviron"
+touch "$renviron"
+{
+  grep -vE '^(R_LIBS_USER|RENV_PATHS_CACHE)=' "$renviron" || true
+  printf 'R_LIBS_USER=%s/.R/library\n' "$HOME"
+  printf 'RENV_PATHS_CACHE=%s/.cache/R/renv\n' "$HOME"
+} > "${renviron}.tmp"
+mv "${renviron}.tmp" "$renviron"
 
 # -------------------------------------------------------------------
 # 6. Pre-install heavy packages (CRAN + Bioconductor + GitHub).
